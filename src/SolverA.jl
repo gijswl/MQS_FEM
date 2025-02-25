@@ -2,34 +2,8 @@ using Ferrite
 using FerriteGmsh
 using SparseArrays
 
-# RefTetrahedron, 1st order Lagrange
-# https://defelement.org/elements/examples/tetrahedron-nedelec1-lagrange-1.html
-#Ferrite.facedof_indices(::Nedelec{RefTetrahedron, 1}) = ((1, 3, 2), (1, 2, 4), (2, 3, 4), (1, 4, 3))
-Ferrite.edgedof_indices(::Nedelec{RefTetrahedron, 1}) = ((1, 2), (2, 3), (3, 1), (1, 4), (2, 4), (3, 4))
-
-function Ferrite.reference_coordinates(::Nedelec{RefTetrahedron, 1})
-    return [
-        Vec{3, Float64}((0.0, 0.0, 0.0)),
-        Vec{3, Float64}((1.0, 0.0, 0.0)),
-        Vec{3, Float64}((0.0, 1.0, 0.0)),
-        Vec{3, Float64}((0.0, 0.0, 1.0)),
-    ]
-end
-
-function Ferrite.reference_shape_value(ip::Nedelec{RefTetrahedron,1}, ξ::Vec{3}, i::Int)
-    x, y, z = ξ
-
-    i == 1 && return Vec(0 * x, -z, y)
-    i == 2 && return Vec(-z, 0 * x, x)
-    i == 3 && return Vec(-y, x, 0 * x)
-    i == 4 && return Vec(z, z, -x - y + 1)
-    i == 5 && return Vec(y, -x - z + 1, y)
-    i == 6 && return Vec(-y - z + 1, x, x)
-    throw(ArgumentError("no shape function $i for interpolation $ip"))
-end
-
-Ferrite.getnbasefunctions(::Nedelec{RefTetrahedron,1}) = 6
-Ferrite.adjust_dofs_during_distribution(::Nedelec{RefTetrahedron,1}) = false
+include("FerriteAdditions.jl")
+include("PostProcessing.jl")
 
 function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
     n_basefuncs = getnbasefunctions(cv)
@@ -64,7 +38,7 @@ function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
     return K, f
 end
 
-function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, ω::Real, νe::Complex, σe::Complex, Je::Vec{2,<:Complex})
+function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, ω::Real, νe::Complex, σe::Complex, Je::Vec{3,<:Complex})
     # Reset to 0
     fill!(Ke, 0)
     fill!(fe, 0)
@@ -116,18 +90,15 @@ close!(ch)
 ω = 2π * 50
 
 materials = Dict(
-    "Conductor" => Dict(
-        "μr" => 1,
-        "σ" => 36.9e6,
-        "J0" => Vec{2}([1, 0])),
-    "Sheath" => Dict(
-        "μr" => 1,
-        "σ" => 59.6e6
+    "Coil" => Dict(
+    ),
+    "Plate" => Dict(
+        "σ" => 3.526e7,
     )
 )
 
 Ncells = getncells(dh.grid)
-J0 = zeros(Vec{2,Complex{Float64}}, Ncells)
+J0 = zeros(Vec{3,Complex{Float64}}, Ncells)
 σ = 1e-9 * ones(Complex{Float64}, Ncells)
 μr = ones(Complex{Float64}, Ncells)
 
@@ -147,6 +118,45 @@ for (domain, material) ∈ materials
     end
 end
 
+It = 2742
+w = 0.025
+h = 0.100
+cx_min = 0.294 - 0.150
+cx_max = 0.294 - 0.050
+cy_min = 0.050
+cy_max = 0.150
+
+function proj(x, x_min, x_max)
+    if (x - x_min > 0)
+        if (x - x_max > 0)
+            return x_max
+        else
+            return x
+        end
+    else
+        return x_min
+    end
+end
+
+# Loop over all cells in the coil
+for cell ∈ CellIterator(dh, getcellset(dh.grid, "Coil"))
+    # Reinitialize cellvalues for this cell
+    reinit!(cv, cell)
+
+    cell_id = cellid(cell)
+    xe = getcoordinates(dh.grid, cell_id)
+
+    Jcell = zero(Vec{3,Complex{Float64}})
+    for x ∈ xe
+        proj_x = proj(x[1], cx_min, cx_max)
+        proj_y = proj(x[2], cy_min, cy_max)
+        τ = Vec{3}((proj_y - x[2], x[1] - proj_x, 0))
+        Jcell += It / (w * h) / length(xe) * τ / norm(τ)
+    end
+
+    J0[cell_id] = Jcell
+end
+
 μ0 = 4π * 1e-7
 ν = 1 ./ (μ0 * μr)
 
@@ -162,7 +172,22 @@ apply!(K, f, ch)
 
 u = K \ f
 
+B = ComputeFluxDensity(cv, dh, u)
+Babs = [Vec{3}(abs.(Bel)) for Bel ∈ B]
+Breal = [Vec{3}(real.(Bel)) for Bel ∈ B]
+Bimag = [Vec{3}(imag.(Bel)) for Bel ∈ B]
 
-VTKGridFile("test/results/test_cable_single", dh) do vtk
+J = ComputeCurrentDensity(cv, dh, u)
+Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
+Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
+Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
+
+VTKGridFile("test/results/team7", dh) do vtk
     write_solution(vtk, dh, abs.(u))
+    write_cell_data(vtk, Babs, "abs(B)")
+    write_cell_data(vtk, Breal, "real(B)")
+    write_cell_data(vtk, Bimag, "imag(B)")
+    write_cell_data(vtk, Jabs, "abs(J)")
+    write_cell_data(vtk, Jreal, "real(J)")
+    write_cell_data(vtk, Jimag, "imag(J)")
 end

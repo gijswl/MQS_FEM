@@ -38,4 +38,8 @@ mesh.generate(3)
 faces_outer = model.getBoundary([(3, 1), (3, 2), (3, 3)], true, false)
 model.addPhysicalGroup(2, [f[2] for f ∈ faces_outer], 1, "outer")
 
+model.addPhysicalGroup(3, [1], 1, "Plate")
+model.addPhysicalGroup(3, [2], 2, "Coil")
+model.addPhysicalGroup(3, [3], 3, "Domain")
+
 gmsh.write("test/mesh/team7.msh")
