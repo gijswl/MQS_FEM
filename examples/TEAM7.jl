@@ -2,8 +2,8 @@ using Ferrite
 using FerriteGmsh
 using SparseArrays
 
-include("FerriteAdditions.jl")
-include("PostProcessing.jl")
+include("src/FerriteAdditions.jl")
+include("src/PostProcessing3D.jl")
 
 function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
     n_basefuncs = getnbasefunctions(cv)
@@ -67,7 +67,7 @@ function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, ω::Real, νe::Co
     return Ke, fe
 end
 
-grid = saved_file_to_grid("test/mesh/team7.msh");
+grid = saved_file_to_grid("examples/mesh/team7.msh");
 
 order = 1
 shape = RefTetrahedron
@@ -99,7 +99,7 @@ materials = Dict(
 
 Ncells = getncells(dh.grid)
 J0 = zeros(Vec{3,Complex{Float64}}, Ncells)
-σ = 1e-9 * ones(Complex{Float64}, Ncells)
+σ = 1e-3 * ones(Complex{Float64}, Ncells)
 μr = ones(Complex{Float64}, Ncells)
 
 for (domain, material) ∈ materials
@@ -182,7 +182,7 @@ Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
 Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
 Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
 
-VTKGridFile("test/results/team7", dh) do vtk
+VTKGridFile("examples/results/team7", dh) do vtk
     write_solution(vtk, dh, abs.(u))
     write_cell_data(vtk, Babs, "abs(B)")
     write_cell_data(vtk, Breal, "real(B)")

@@ -27,10 +27,10 @@ nodes_all = model.getEntities(0);
 mesh.setSize(nodes_all, 0.2);
 
 nodes_plate = model.getBoundary((3, 1), false, false, true)
-mesh.setSize(nodes_plate, 0.02);
+mesh.setSize(nodes_plate, 0.01);
 
 nodes_coil = model.getBoundary((3, 2), false, false, true)
-mesh.setSize(nodes_coil, 0.02);
+mesh.setSize(nodes_coil, 0.01);
 
 mesh.generate(3)
 
@@ -42,4 +42,4 @@ model.addPhysicalGroup(3, [1], 1, "Plate")
 model.addPhysicalGroup(3, [2], 2, "Coil")
 model.addPhysicalGroup(3, [3], 3, "Domain")
 
-gmsh.write("test/mesh/team7.msh")
+gmsh.write("examples/mesh/team7.msh")
