@@ -1,3 +1,23 @@
+get_edge_direction(cell, edgenr) = get_edge_direction(Ferrite.edges(cell)[edgenr])
+get_face_direction(cell, facenr) = get_face_direction(Ferrite.faces(cell)[facenr])
+
+function get_edge_direction(edgenodes::Tuple)
+    positive = edgenodes[2] > edgenodes[1]
+    return ifelse(positive, 1, -1)
+end
+
+function get_face_direction(facenodes::Tuple)
+    min_idx = argmin(facenodes)
+    if min_idx == 1
+        positive = facenodes[2] < facenodes[end]
+    elseif min_idx == length(facenodes)
+        positive = facenodes[1] < facenodes[end - 1]
+    else
+        positive = facenodes[min_idx + 1] < facenodes[min_idx - 1]
+    end
+    return ifelse(positive, 1, -1)
+end
+
 # RefTetrahedron, 1st order Lagrange
 # https://defelement.org/elements/examples/tetrahedron-nedelec1-lagrange-1.html
 function Ferrite.reference_shape_value(ip::Nedelec{RefTetrahedron,1}, ξ::Vec{3}, i::Int)
@@ -18,10 +38,8 @@ Ferrite.facedof_indices(::Nedelec{RefTetrahedron,1}) = ((1, 2, 3), (1, 4, 5), (2
 Ferrite.adjust_dofs_during_distribution(::Nedelec{RefTetrahedron,1}) = false
 
 function Ferrite.get_direction(::Nedelec{RefTetrahedron,1}, j, cell)
-    edge = Ferrite.edges(cell)[j]
-    return ifelse(edge[2] > edge[1], 1, -1)
+    return get_edge_direction(cell, j)
 end
-
 
 
 function Ferrite._evaluate_at_grid_nodes!(
