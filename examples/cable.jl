@@ -46,6 +46,7 @@ apply!(K, f, ch)
 u = K \ f;
 Bre_cell, Bim_cell = ComputeFluxDensity(dh, cv, u, prob, cellparams)
 J_cell = ComputeCurrentDensity(dh, cv, u, prob, cellparams)
+S_cell = ComputeLossDensity(dh, cv, u, J_cell, Bre_cell, Bim_cell, prob, cellparams)
 
 VTKGridFile("examples/results/cable_single", dh) do vtk
     write_solution(vtk, dh, abs.(u), "_abs")
@@ -54,4 +55,6 @@ VTKGridFile("examples/results/cable_single", dh) do vtk
     write_cell_data(vtk, real.(J_cell), "J_real")
     write_cell_data(vtk, imag.(J_cell), "J_imag")
     write_cell_data(vtk, norm.(J_cell), "J_norm")
+    write_cell_data(vtk, imag.(S_cell), "S_imag")
+    write_cell_data(vtk, real.(S_cell), "S_real")
 end

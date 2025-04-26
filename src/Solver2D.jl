@@ -22,18 +22,40 @@ function create_bc(dh::DofHandler, field::Symbol, bc::BoundaryFlux, boundary::St
     )
 end
 
-function apply_material!(J0, σ, μr, cellset, material)
+function apply_material!(J0, σ, ν, cellset, material)
     if (haskey(material, "σ"))
         σ[cellset] .= material["σ"]
     end
     if (haskey(material, "μr"))
-        μr[cellset] .= material["μr"]
+        μr_ = material["μr"]
+        ν_ = 1 ./ (μ0 * μr_)
+        if (length(ν_) == 2)
+            for cell in cellset
+                ν[cell] = Tensor{2,2,Complex{Float64}}((ν_[1], 0, 0, ν_[2]))
+            end
+        else
+            for cell in cellset
+                ν[cell] = Tensor{2,2,Complex{Float64}}((ν_, 0, 0, ν_))
+            end
+        end
+    end
+    if (haskey(material, "ν"))
+        ν_ = material["ν"]
+        if (length(ν_) == 2)
+            for cell in cellset
+                ν[cell] = Tensor{2,2,Complex{Float64}}((ν_[1], 0, 0, ν_[2]))
+            end
+        else
+            for cell in cellset
+                ν[cell] = Tensor{2,2,Complex{Float64}}((ν_, 0, 0, ν_))
+            end
+        end
     end
     if (haskey(material, "J0"))
         J0[cellset] .= material["J0"]
     end
 
-    return J0, σ, μr
+    return J0, σ, ν
 end
 
 function init_problem(problem::Problem2D, grid::Grid{2})
@@ -60,15 +82,13 @@ function init_params(dh::DofHandler, problem::Problem2D{T}) where {T}
     Ncells = getncells(grid)
     J0 = zeros(T, Ncells)
     σ = zeros(T, Ncells)
-    μr = ones(T, Ncells)
+    ν = [Tensor{2,2,T}((1 / μ0, 0, 0, 1 / μ0)) for _ in 1:Ncells]
 
     for (domain, material) ∈ problem.materials
         cellset = collect(getcellset(grid, domain))
 
-        apply_material!(J0, σ, μr, cellset, material)
+        apply_material!(J0, σ, ν, cellset, material)
     end
-
-    ν = 1 ./ (μ0 * μr)
 
     return CellParams(J0, σ, ν)
 end
@@ -125,7 +145,7 @@ function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CellValues, pro
     return K, f
 end
 
-function assemble_element!(::Planar2D, time::TimeStatic, Ke::Matrix, fe::Vector, cv::CellValues, Je::T, σe::T, νe::T, x::Vector{<:Vec{2}}) where {T}
+function assemble_element!(::Planar2D, time::TimeStatic, Ke::Matrix, fe::Vector, cv::CellValues, Je::T, σe::T, νe::Tensor{2,2,<:T}, x::Vector{<:Vec{2}}) where {T}
     n_basefuncs = getnbasefunctions(cv)
 
     # Reset local contribution to 0
@@ -150,7 +170,7 @@ function assemble_element!(::Planar2D, time::TimeStatic, Ke::Matrix, fe::Vector,
                 ∇u = shape_gradient(cv, q_point, j)
 
                 # Add contribution to Ke
-                Ke[i, j] += νe * (∇v ⋅ ∇u) * dΩ
+                Ke[i, j] += (∇v ⋅ νe ⋅ ∇u) * dΩ
             end
         end
     end
@@ -158,7 +178,7 @@ function assemble_element!(::Planar2D, time::TimeStatic, Ke::Matrix, fe::Vector,
     return Ke, fe
 end
 
-function assemble_element!(::Planar2D, time::TimeHarmonic, Ke::Matrix, fe::Vector, cv::CellValues, Je::T, σe::T, νe::T, x::Vector{<:Vec{2}}) where {T}
+function assemble_element!(::Planar2D, time::TimeHarmonic, Ke::Matrix, fe::Vector, cv::CellValues, Je::T, σe::T, νe::Tensor{2,2,<:T}, x::Vector{<:Vec{2}}) where {T}
     n_basefuncs = getnbasefunctions(cv)
     ω = time.ω
 
@@ -185,7 +205,7 @@ function assemble_element!(::Planar2D, time::TimeHarmonic, Ke::Matrix, fe::Vecto
                 ∇u = shape_gradient(cv, q_point, j)
 
                 # Add contribution to Ke
-                Ke[i, j] += (νe * (∇v ⋅ ∇u) + 1im * ω * σe * (v * u)) * dΩ
+                Ke[i, j] += ((∇v ⋅ νe ⋅ ∇u) + 1im * ω * σe * (v * u)) * dΩ
             end
         end
     end

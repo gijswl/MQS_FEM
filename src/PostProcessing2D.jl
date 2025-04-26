@@ -144,3 +144,39 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, u::AbstractVector
 
     return Jsource + Jeddy
 end
+
+function ComputeLossDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
+    if(typeof(problem.time) <: TimeHarmonic)
+        ω = problem.time.ω
+    else
+        ω = 0
+    end
+
+    σ = cellparams.σ
+    ν = cellparams.ν
+
+    S_cell = zeros(Complex{Float64}, getncells(dh.grid))
+
+    for cell ∈ CellIterator(dh)
+        cell_num = cellid(cell)
+        Je = J[cell_num]
+        σe = σ[cell_num]
+        νe = ν[cell_num]
+
+        Bre_e = Bre[cell_num]
+        Bim_e = Bim[cell_num]
+
+        B_e = Vec{2, T}((Bre_e[1] + 1im * Bim_e[1], Bre_e[2] + 1im * Bim_e[2]))
+
+        sm = 0.5im * ω * B_e ⋅ Vec{2}(conj(νe ⋅ B_e))
+        if (norm(Je) > 0)
+            se = norm(Je)^2 / (2 * σe)
+        else
+            se = 0
+        end
+
+        S_cell[cell_num] += se + sm
+    end
+
+    return S_cell
+end

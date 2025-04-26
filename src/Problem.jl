@@ -64,8 +64,7 @@ end
 
 # Cell parameters
 struct CellParams{T}
-    J0::Vector{T}    # Source current density [A/m^2]
-    σ::Vector{T}     # Conductivity [S/m]
-    ν::Vector{T}     # Reluctivity [m/H]
-    # TODO allow for anisotropic permeability/reluctivity
+    J0::Vector{T}            # Source current density [A/m^2]
+    σ::Vector{T}             # Conductivity [S/m]
+    ν::Vector{<:Tensor{2,2,T}} # Reluctivity tensor [m/H]
 end
