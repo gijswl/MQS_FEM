@@ -2,6 +2,10 @@ using Ferrite
 using FerriteGmsh
 using SparseArrays
 
+using CairoMakie
+
+using IterativeSolvers
+
 include("../src/FerriteAdditions.jl")
 include("../src/PostProcessing3D.jl")
 
@@ -94,14 +98,13 @@ end
 
 grid = saved_file_to_grid("examples/mesh/team7.msh");
 
-order = 1
 shape = RefTetrahedron
 
-ip_A = Nedelec{shape,order}()
-ip_ϕ = Lagrange{shape,order}()
+ip_A = Nedelec{shape,1}()
+ip_ϕ = Lagrange{shape,1}()
 ip_geo = Lagrange{shape,1}()
 
-qr = QuadratureRule{shape}(2 * order)
+qr = QuadratureRule{shape}(4)
 cv = (A = CellValues(qr, ip_A, ip_geo), ϕ = CellValues(qr, ip_ϕ, ip_geo))
 
 dh = DofHandler(grid)
@@ -110,12 +113,13 @@ add!(dh, :ϕ, ip_ϕ)
 close!(dh)
 
 ch = ConstraintHandler(dh)
-add!(ch, WeakDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # WeakDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
+add!(ch, ProjectedDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # ProjectedDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
 add!(ch, Dirichlet(:ϕ, getfacetset(dh.grid, "outer"), Returns(0.0)))
 close!(ch)
 
 ## Simulation settings
-ω = 2π * 200
+freq = 50
+ω = 2π * freq
 
 materials = Dict(
     "Coil" => Dict(
@@ -227,8 +231,9 @@ Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
 Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
 Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
 
-VTKGridFile("examples/results/team7_200Hz", dh) do vtk
+VTKGridFile("examples/results/team7_$(freq)Hz", dh) do vtk
     write_solution(vtk, dh, abs.(u))
+    Ferrite.write_cellset(vtk, dh.grid)
     write_cell_data(vtk, Babs, "abs(B)")
     write_cell_data(vtk, Breal, "real(B)")
     write_cell_data(vtk, Bimag, "imag(B)")
