@@ -1,14 +1,18 @@
 using Ferrite
 using FerriteGmsh
 using SparseArrays
+using LinearAlgebra
 
-using CairoMakie
+#using IterativeSolvers
+using Krylov
+using KrylovPreconditioners
 
-using IterativeSolvers
+using TimerOutputs: reset_timer!, @timeit, print_timer
 
 include("../src/FerriteAdditions.jl")
 include("../src/PostProcessing3D.jl")
 
+## Matrix assembly functions
 function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
     n_basefuncs = getnbasefunctions(cv.A) + getnbasefunctions(cv.ϕ)
     Ke = zeros(Complex{Float64}, n_basefuncs, n_basefuncs)
@@ -25,26 +29,28 @@ function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
 
     # Loop over all cells
     for cell ∈ CellIterator(dh)
-        # Reinitialize cellvalues for this cell
-        reinit!(cv.A, cell)
-        reinit!(cv.ϕ, cell)
+        @timeit "element" begin
+            # Reinitialize cellvalues for this cell
+            reinit!(cv.A, cell)
+            reinit!(cv.ϕ, cell)
 
-        cell_id = cellid(cell)
+            cell_id = cellid(cell)
 
-        Je = J0[cell_id]
-        σe = σ[cell_id]
-        νe = ν[cell_id]
+            Je = J0[cell_id]
+            σe = σ[cell_id]
+            νe = ν[cell_id]
 
-        # Compute element contribution
-        assemble_element!(Ke, fe, cv, dofs_A, dofs_ϕ, ω, νe, σe, Je)
+            # Compute element contribution
+            assemble_element!(Ke, fe, cv, dofs_A, dofs_ϕ, ω, νe, σe, Je)
 
-        # Assemble Ke and fe into K and f
-        assemble!(assembler, celldofs(cell), Ke, fe)
+            # Assemble Ke and fe into K and f
+            assemble!(assembler, celldofs(cell), Ke, fe)
+        end
     end
     return K, f
 end
 
-function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, dofs_ϕ, ω::Real, νe::Complex, σe::Complex, Je::Vec{3, <:Complex})
+function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, dofs_ϕ, ω::Real, νe::Complex, σe::Complex, Je::Vec{3,<:Complex})
     # Reset to 0
     fill!(Ke, 0)
     fill!(fe, 0)
@@ -96,148 +102,161 @@ function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, dofs_ϕ, ω::Real
     return Ke, fe
 end
 
-grid = saved_file_to_grid("examples/mesh/team7.msh");
+## Set up problem
+reset_timer!()
 
-shape = RefTetrahedron
+@timeit "setup" begin
+    grid = saved_file_to_grid("examples/mesh/team7.msh")
 
-ip_A = Nedelec{shape,1}()
-ip_ϕ = Lagrange{shape,1}()
-ip_geo = Lagrange{shape,1}()
+    shape = RefTetrahedron
+    ip_A = Nedelec{shape,1}()
+    ip_ϕ = Lagrange{shape,1}()
+    ip_geo = Lagrange{shape,1}()
 
-qr = QuadratureRule{shape}(4)
-cv = (A = CellValues(qr, ip_A, ip_geo), ϕ = CellValues(qr, ip_ϕ, ip_geo))
+    qr = QuadratureRule{shape}(4)
+    cv = (A=CellValues(qr, ip_A, ip_geo), ϕ=CellValues(qr, ip_ϕ, ip_geo))
 
-dh = DofHandler(grid)
-add!(dh, :A, ip_A)
-add!(dh, :ϕ, ip_ϕ)
-close!(dh)
+    dh = DofHandler(grid)
+    add!(dh, :A, ip_A)
+    add!(dh, :ϕ, ip_ϕ)
+    close!(dh)
 
-ch = ConstraintHandler(dh)
-add!(ch, ProjectedDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # ProjectedDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
-add!(ch, Dirichlet(:ϕ, getfacetset(dh.grid, "outer"), Returns(0.0)))
-close!(ch)
+    ch = ConstraintHandler(dh)
+    add!(ch, ProjectedDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # ProjectedDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
+    add!(ch, Dirichlet(:ϕ, getfacetset(dh.grid, "outer"), Returns(0.0)))
+    close!(ch)
 
-## Simulation settings
-freq = 50
-ω = 2π * freq
+    ## Simulation settings
+    freq = 50
+    ω = 2π * freq
 
-materials = Dict(
-    "Coil" => Dict(
-    ),
-    "Plate" => Dict(
-        "σ" => 3.526e7,
+    materials = Dict(
+        "Coil" => Dict(
+        ),
+        "Plate" => Dict(
+            "σ" => 3.526e7,
+        )
     )
-)
 
-Ncells = getncells(dh.grid)
-J0 = zeros(Vec{3,Complex{Float64}}, Ncells)
-σ = 1e-3 * ones(Complex{Float64}, Ncells)
-μr = ones(Complex{Float64}, Ncells)
+    ## Apply material properties
+    Ncells = getncells(dh.grid)
+    J0 = zeros(Vec{3,Complex{Float64}}, Ncells)
+    σ = 1e-5 * ones(Complex{Float64}, Ncells)
+    μr = ones(Complex{Float64}, Ncells)
 
-for (domain, material) ∈ materials
-    cellset = collect(getcellset(dh.grid, domain))
+    for (domain, material) ∈ materials
+        cellset = collect(getcellset(dh.grid, domain))
 
-    if (haskey(material, "σ"))
-        σ[cellset] .= material["σ"]
-    end
-    if (haskey(material, "μr"))
-        μr[cellset] .= material["μr"]
-    end
-    if (haskey(material, "J0"))
-        for cell ∈ cellset
-            J0[cell] = material["J0"]
+        if (haskey(material, "σ"))
+            σ[cellset] .= material["σ"]
+        end
+        if (haskey(material, "μr"))
+            μr[cellset] .= material["μr"]
+        end
+        if (haskey(material, "J0"))
+            for cell ∈ cellset
+                J0[cell] = material["J0"]
+            end
         end
     end
-end
 
-It = 2742
-w = 0.025
-h = 0.100
-cx_min = 0.294 - 0.150
-cx_max = 0.294 - 0.050
-cy_min = 0.050
-cy_max = 0.150
+    ## Apply coil current (TODO coil solver)
+    It = 2742
+    w = 0.025
+    h = 0.100
+    cx_min = 0.294 - 0.150
+    cx_max = 0.294 - 0.050
+    cy_min = 0.050
+    cy_max = 0.150
 
-function proj(x, x_min, x_max)
-    if (x - x_min > 0)
-        if (x - x_max > 0)
-            return x_max
+    function proj(x, x_min, x_max)
+        if (x - x_min > 0)
+            if (x - x_max > 0)
+                return x_max
+            else
+                return x
+            end
         else
-            return x
+            return x_min
         end
-    else
-        return x_min
-    end
-end
-
-# Loop over all cells in the coil
-for cell ∈ CellIterator(dh, getcellset(dh.grid, "Coil"))
-    # Reinitialize cellvalues for this cell
-    reinit!(cv.A, cell)
-    reinit!(cv.ϕ, cell)
-
-    cell_id = cellid(cell)
-    xe = getcoordinates(dh.grid, cell_id)
-
-    Jcell = zero(Vec{3,Complex{Float64}})
-    for x ∈ xe
-        proj_x = proj(x[1], cx_min, cx_max)
-        proj_y = proj(x[2], cy_min, cy_max)
-        τ = Vec{3}((proj_y - x[2], x[1] - proj_x, 0))
-        Jcell += It / (w * h) / length(xe) * τ / norm(τ)
     end
 
-    J0[cell_id] = Jcell
+    # Loop over all cells in the coil
+    for cell ∈ CellIterator(dh, getcellset(dh.grid, "Coil"))
+        # Reinitialize cellvalues for this cell
+        reinit!(cv.A, cell)
+        reinit!(cv.ϕ, cell)
+
+        cell_id = cellid(cell)
+        xe = getcoordinates(dh.grid, cell_id)
+
+        Jcell = zero(Vec{3,Complex{Float64}})
+        for x ∈ xe
+            proj_x = proj(x[1], cx_min, cx_max)
+            proj_y = proj(x[2], cy_min, cy_max)
+            τ = Vec{3}((proj_y - x[2], x[1] - proj_x, 0))
+            Jcell += It / (w * h) / length(xe) * normalize(τ)
+        end
+
+        J0[cell_id] = Jcell
+    end
+
+    μ0 = 4π * 1e-7
+    ν = 1 ./ (μ0 * μr)
 end
 
-μ0 = 4π * 1e-7
-ν = 1 ./ (μ0 * μr)
+## Allocate & assemble system matrix
+@timeit "allocate" begin
+    ndof = ndofs(dh)
+    sp = SparsityPattern(ndof, ndof; nnz_per_row=2 * ndofs_per_cell(dh.subdofhandlers[1])) # How to optimize nnz_per_row?
+    add_sparsity_entries!(sp, dh)
 
+    K = allocate_matrix(SparseMatrixCSC{Complex{Float64},Int}, sp)
+end
+@timeit "assemble" begin
+    K, f = assemble_global(cv, K, dh)
 
-ndof = ndofs(dh)
-sp = SparsityPattern(ndof, ndof; nnz_per_row=2 * ndofs_per_cell(dh.subdofhandlers[1])) # How to optimize nnz_per_row?
-add_sparsity_entries!(sp, dh)
+    apply!(K, f, ch)
+end
 
-K = allocate_matrix(SparseMatrixCSC{Complex{Float64},Int}, sp)
-K, f = assemble_global(cv, K, dh)
+## Solve
+@timeit "solve" begin
+    workspace = GmresWorkspace(K, f; memory=20)
+    workspace = Krylov.gmres!(workspace, K, f; verbose=5, history=true, restart=true, itmax=1000)
 
-apply!(K, f, ch)
+    u = workspace.x
+    stats = workspace.stats
+end
 
-# Direct solvers
-# umfpack_control = SparseArrays.UMFPACK.get_umfpack_control(Float64, Int64) # read Julia default configuration for a Float64 sparse matrix
-# umfpack_control[SparseArrays.UMFPACK.JL_UMFPACK_IRSTEP] = 2.0 # reenable iterative refinement (2 is UMFPACK default max iterative refinement steps)
-# Klu = lu(K; control = umfpack_control)
-
-# u = Klu \ f
-
-# Iterative solvers
-p = IterativeSolvers.Identity()
-# p = DiagonalPreconditioner(K)
-# (u, hist) = bicgstabl(K, f, 4; Pl = p, log = true, verbose = true, max_mv_products = 2000)
-(u, hist) = gmres(K, f; Pl = p, log = true, verbose = true, maxiter = 1000, reltol = 1e-8)
-
+## Plot convergence history
+using CairoMakie
 fig = Figure()
-ax = Axis(fig[1,1], title = "Convergence", xlabel = "Iteration", ylabel = "Residual norm", yscale = log10)
-lines!(ax, hist[:resnorm])
+ax = Axis(fig[1, 1], title="Convergence", xlabel="Iteration", ylabel="Residual norm", yscale=log10)
+lines!(ax, stats.residuals)
 display(fig)
 
-B = ComputeFluxDensity(cv.A, cv.ϕ, dh, u)
-Babs = [Vec{3}(abs.(Bel)) for Bel ∈ B]
-Breal = [Vec{3}(real.(Bel)) for Bel ∈ B]
-Bimag = [Vec{3}(imag.(Bel)) for Bel ∈ B]
+## Post-processing
+@timeit "post-processing" begin
+    B = ComputeFluxDensity(cv.A, cv.ϕ, dh, u)
+    Babs = [Vec{3}(abs.(Bel)) for Bel ∈ B]
+    Breal = [Vec{3}(real.(Bel)) for Bel ∈ B]
+    Bimag = [Vec{3}(imag.(Bel)) for Bel ∈ B]
 
-J = ComputeCurrentDensity(cv.A, cv.ϕ, dh, u)
-Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
-Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
-Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
+    J = ComputeCurrentDensity(cv.A, cv.ϕ, dh, u)
+    Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
+    Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
+    Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
 
-VTKGridFile("examples/results/team7_$(freq)Hz", dh) do vtk
-    write_solution(vtk, dh, abs.(u))
-    Ferrite.write_cellset(vtk, dh.grid)
-    write_cell_data(vtk, Babs, "abs(B)")
-    write_cell_data(vtk, Breal, "real(B)")
-    write_cell_data(vtk, Bimag, "imag(B)")
-    write_cell_data(vtk, Jabs, "abs(J)")
-    write_cell_data(vtk, Jreal, "real(J)")
-    write_cell_data(vtk, Jimag, "imag(J)")
+    VTKGridFile("examples/results/team7_$(freq)Hz", dh) do vtk
+        write_solution(vtk, dh, abs.(u))
+        Ferrite.write_cellset(vtk, dh.grid)
+        write_cell_data(vtk, Babs, "abs(B)")
+        write_cell_data(vtk, Breal, "real(B)")
+        write_cell_data(vtk, Bimag, "imag(B)")
+        write_cell_data(vtk, Jabs, "abs(J)")
+        write_cell_data(vtk, Jreal, "real(J)")
+        write_cell_data(vtk, Jimag, "imag(J)")
+    end
 end
+
+print_timer()
