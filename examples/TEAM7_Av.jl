@@ -113,7 +113,7 @@ reset_timer!()
     ip_ϕ = Lagrange{shape,1}()
     ip_geo = Lagrange{shape,1}()
 
-    qr = QuadratureRule{shape}(4)
+    qr = QuadratureRule{shape}(2)
     cv = (A=CellValues(qr, ip_A, ip_geo), ϕ=CellValues(qr, ip_ϕ, ip_geo))
 
     dh = DofHandler(grid)
