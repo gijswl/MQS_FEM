@@ -12,12 +12,13 @@ reset_timer!()
 
     f = 50
     T = Complex{Float64}
+    A_cond = π * 19.1e-3^2
+    I_cond = 1000
 
     materials = Dict(
         "Conductor" => Dict(
             "μr" => 1,
-            "σ" => 36.9e6,
-            "J0" => 0.8e6
+            "σ" => 36.9e6
         ),
         "Sheath" => Dict(
             "μr" => 1,
@@ -30,7 +31,7 @@ reset_timer!()
     )
 
     prob = Problem2D{T}(
-        symmetry=Planar2D(),
+        symmetry=Planar2D(1),
         time=TimeHarmonic(ω=2π * f),
         #time = TimeStatic(),
         fe_order=2,
@@ -41,14 +42,18 @@ reset_timer!()
     )
 
     cv, dh = init_problem(prob, grid)
+    cch = CircuitHandler(dh, T)
+    add_current_coupling!(cch, "Conductor", I_cond, A_cond, 0.25)
+
     ch = init_constraints(dh, prob)
     cellparams = init_params(dh, prob)
 
-    K = allocate(dh, prob)
+    K = allocate(dh, cch, prob)
 end
 
 @timeit "assemble" begin
     K, f = assemble_global(K, dh, cv, prob, cellparams)
+    apply_circuit_couplings!(prob, prob.time, cellparams, K, f, cv, dh, cch)
 
     apply!(K, f, ch)
 end
@@ -60,9 +65,9 @@ end
     # Iterative
     ilu_τ = 1e-3 * maximum(norm.(K))
 
-    Pℓ = ilu(K, τ = ilu_τ)
+    Pℓ = ilu(K, τ=ilu_τ)
     workspace = BicgstabWorkspace(K, f)
-    workspace = bicgstab!(workspace, K, f; M = Pℓ, ldiv = true, itmax=1000, verbose=5, history=true)
+    workspace = bicgstab!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, history=true)
 
     u = workspace.x
     stats = workspace.stats
@@ -70,8 +75,9 @@ end
 
 @timeit "post-processing" begin
     Bre_cell, Bim_cell = ComputeFluxDensity(dh, cv, u, prob, cellparams)
-    J_cell = ComputeCurrentDensity(dh, cv, u, prob, cellparams)
-    S_cell = ComputeLossDensity(dh, cv, u, J_cell, Bre_cell, Bim_cell, prob, cellparams)
+    J_cell = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
+    S_cell = ComputeLossDensity(dh, cv, J_cell, Bre_cell, Bim_cell, prob, cellparams)
+    (_, I_circ, _, R_circ) = ComputeLoss(dh, cv, cch, J_cell, Bre_cell, Bim_cell, prob, cellparams)
 
     VTKGridFile("examples/results/cable_single", dh) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
@@ -93,3 +99,11 @@ fig = Figure()
 ax = Axis(fig[1, 1], title="Convergence", xlabel="Iteration", ylabel="Residual norm", yscale=log10)
 lines!(ax, stats.residuals)
 display(fig)
+
+
+σ = materials["Conductor"]["σ"]
+d = 2 * 19.1e-3
+Rdc = 1 / (σ * π/4 * d^2)
+
+println("DC resistance: $(Rdc * 1e6) mΩ/km")
+println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")

@@ -1,5 +1,5 @@
-function get_modeldepth(problem::Problem2D, ::Planar2D, ::Any)
-    return problem.depth
+function get_modeldepth(problem::Problem2D, symmetry::Planar2D, ::Any)
+    return symmetry.depth
 end
 
 function get_modeldepth(::Problem2D, ::Axi2D, x::Vec{2,<:Real})
@@ -111,6 +111,17 @@ end
 
 function allocate(dh::DofHandler, ::Problem2D{T}) where {T}
     K = allocate_matrix(SparseMatrixCSC{T,Int}, dh)
+
+    return K
+end
+
+function allocate(dh::DofHandler, cch::CircuitHandler, ::Problem2D{T}) where {T}
+    ndof = ndofs(dh) + ncouplings(cch)
+    sp = SparsityPattern(ndof, ndof; nnz_per_row=2 * ndofs_per_cell(dh.subdofhandlers[1])) # How to optimize nnz_per_row?
+    add_sparsity_entries!(sp, dh)
+    add_sparsity_circuit!(sp, dh, cch)
+
+    K = allocate_matrix(SparseMatrixCSC{T,Int}, sp)
 
     return K
 end

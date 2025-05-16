@@ -145,7 +145,63 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, u::AbstractVector
     return Jsource + Jeddy
 end
 
-function ComputeLossDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
+function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
+    n_basefuncs = getnbasefunctions(cv)
+    n_quadpts = getnquadpoints(cv)
+    cell_dofs = zeros(Int, n_basefuncs)
+
+    if(typeof(problem.time) <: TimeHarmonic)
+        ω = problem.time.ω
+    else
+        ω = 0
+    end
+
+    # Allocate storage for the current density vectors
+    Ncell = getncells(dh.grid)
+    Jsource = zeros(T, Ncell)
+    Jeddy = zeros(T, Ncell)
+
+    for (cell_num, cell) ∈ enumerate(CellIterator(dh))
+        celldofs!(cell_dofs, dh, cell_num)
+        reinit!(cv, cell)
+
+        ue = u[cell_dofs] # TODO eddy currents in axisymmetric model
+        σe = cellparams.σ[cell_num]
+
+        AvgAz = zero(T)
+        cell_area = 0
+
+        for q_point ∈ 1:n_quadpts
+            uq = function_value(cv, q_point, ue)
+            dΩ = getdetJdV(cv, q_point)
+
+            AvgAz += uq * dΩ
+            cell_area += dΩ
+        end
+        AvgAz /= cell_area
+
+        Jeddy[cell_num] += -1im * σe * ω * AvgAz
+        Jsource[cell_num] += cellparams.J0[cell_num]
+    end
+
+    for (i, coupling) ∈ enumerate(ch.coupling)
+        coupling_idx = ndofs(dh) + i
+
+        for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
+            reinit!(cv, cell)
+            cell_num = cellid(cell)
+
+            σe = cellparams.σ[cell_num]
+            νe = cellparams.ν[cell_num]
+
+            Jsource[cell_num] += u[coupling_idx] / (coupling.symm_factor * coupling.area)
+        end
+    end
+
+    return Jsource + Jeddy
+end
+
+function ComputeLossDensity(dh::DofHandler, cv::CellValues, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
     if(typeof(problem.time) <: TimeHarmonic)
         ω = problem.time.ω
     else
@@ -179,4 +235,48 @@ function ComputeLossDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}
     end
 
     return S_cell
+end
+
+function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
+    n_quadpts = getnquadpoints(cv)
+
+    # Result storage
+    ## Cell quantities
+    S_cell = zeros(Complex{Float64}, getncells(dh.grid))
+
+    ## Circuit quantites
+    I_circ = zeros(Complex{Float64}, length(ch.coupling))
+    S_circ = zeros(Complex{Float64}, length(ch.coupling))
+    R_circ = zeros(Float64, length(ch.coupling))
+
+    # Calculate the complex loss density for each cell
+    S_cell = ComputeLossDensity(dh, cv, J, Bre, Bim, problem, cellparams)
+
+    # Calculate the loss and current for each circuit
+    for (i, coupling) ∈ enumerate(ch.coupling)
+        for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
+            reinit!(cv, cell)
+            cell_num = cellid(cell)
+
+            Je = J[cell_num]
+            Se = S_cell[cell_num]
+            xe = getcoordinates(dh.grid, cell_num)
+
+            for q_point ∈ 1:n_quadpts
+                dΩ = getdetJdV(cv, q_point)
+                xq = spatial_coordinate(cv, q_point, xe)
+
+                depth = get_modeldepth(problem, problem.symmetry, xq)
+
+                I_circ[i] += Je * dΩ
+                S_circ[i] += Se * depth * dΩ
+            end
+        end
+
+        I_circ[i] = I_circ[i] / coupling.symm_factor
+        S_circ[i] = S_circ[i] / coupling.symm_factor
+        R_circ[i] = real(2 * S_circ[i] / norm(I_circ[i])^2)
+    end
+
+    return (S_cell, I_circ, S_circ, R_circ)
 end

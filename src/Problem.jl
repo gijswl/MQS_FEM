@@ -31,7 +31,9 @@ end
 ## Two-dimensional problem
 abstract type Symmetry2D end
 struct Axi2D <: Symmetry2D end
-struct Planar2D <: Symmetry2D end
+struct Planar2D <: Symmetry2D 
+    depth::Real
+end
 
 @kwdef struct Problem2D{T} <: AbstractProblem
     symmetry::Symmetry2D
