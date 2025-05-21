@@ -78,9 +78,9 @@ end
 end
 
 @timeit "post-processing" begin
-    Bre_cell, Bim_cell = ComputeFluxDensity(dh, cv, u, prob, cellparams)
-    J_cell = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
-    (_, I_circ, _, R_circ) = ComputeLoss(dh, cv, cch, J_cell, Bre_cell, Bim_cell, prob, cellparams)
+    B = ComputeFluxDensity(dh, cv, u, prob, cellparams)
+    J = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
+    (I_circ, S_circ, R_circ) = ComputeLoss(dh, cv, cch, J, B, prob, cellparams)
 
     VTKGridFile("examples/hv_cable/results/cable_single", dh; write_discontinuous = true) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
