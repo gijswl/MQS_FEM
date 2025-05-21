@@ -3,18 +3,16 @@ using FerriteGmsh
 using SparseArrays
 using LinearAlgebra
 
-#using IterativeSolvers
 using Krylov
 using KrylovPreconditioners
 
 using TimerOutputs: reset_timer!, @timeit, print_timer
 
-include("../src/FerriteAdditions.jl")
-include("../src/PostProcessing3D.jl")
+include("../../src/FerriteAdditions.jl")
+include("../../src/PostProcessing3D.jl")
 
-## Matrix assembly functions
 function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
-    n_basefuncs = getnbasefunctions(cv.A) + getnbasefunctions(cv.ϕ)
+    n_basefuncs = getnbasefunctions(cv)
     Ke = zeros(Complex{Float64}, n_basefuncs, n_basefuncs)
     fe = zeros(Complex{Float64}, n_basefuncs)
 
@@ -25,76 +23,49 @@ function assemble_global(cv, K::SparseMatrixCSC, dh::DofHandler)
     assembler = start_assemble(K, f)
 
     dofs_A = pairs(dof_range(dh, :A))
-    dofs_ϕ = pairs(dof_range(dh, :ϕ))
 
     # Loop over all cells
     for cell ∈ CellIterator(dh)
-        @timeit "element" begin
-            # Reinitialize cellvalues for this cell
-            reinit!(cv.A, cell)
-            reinit!(cv.ϕ, cell)
+        # Reinitialize cellvalues for this cell
+        reinit!(cv, cell)
 
-            cell_id = cellid(cell)
+        cell_id = cellid(cell)
 
-            Je = J0[cell_id]
-            σe = σ[cell_id]
-            νe = ν[cell_id]
+        Je = J0[cell_id]
+        σe = σ[cell_id]
+        νe = ν[cell_id]
 
-            # Compute element contribution
-            assemble_element!(Ke, fe, cv, dofs_A, dofs_ϕ, ω, νe, σe, Je)
+        # Compute element contribution
+        assemble_element!(Ke, fe, cv, dofs_A, ω, νe, σe, Je)
 
-            # Assemble Ke and fe into K and f
-            assemble!(assembler, celldofs(cell), Ke, fe)
-        end
+        # Assemble Ke and fe into K and f
+        assemble!(assembler, celldofs(cell), Ke, fe)
     end
     return K, f
 end
 
-function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, dofs_ϕ, ω::Real, νe::Complex, σe::Complex, Je::Vec{3,<:Complex})
+function assemble_element!(Ke::Matrix, fe::Vector, cv, dofs_A, ω::Real, νe::Complex, σe::Complex, Je::Vec{3,<:Complex})
     # Reset to 0
     fill!(Ke, 0)
     fill!(fe, 0)
 
-    for q_point ∈ 1:getnquadpoints(cv.A)
-        dΩ = getdetJdV(cv.A, q_point)
+    for q_point ∈ 1:getnquadpoints(cv)
+        dΩ = getdetJdV(cv, q_point)
 
         # Loop over test shape functions
         for (i, dof_i) ∈ dofs_A
-            v = shape_value(cv.A, q_point, i)
-            curl_v = shape_curl(cv.A, q_point, i)
+            v = shape_value(cv, q_point, i)
+            curl_v = shape_curl(cv, q_point, i)
 
             # Add contribution to fe
             fe[dof_i] += Je ⋅ v * dΩ
 
             # Loop over trial shape functions
             for (j, dof_j) ∈ dofs_A
-                u = shape_value(cv.A, q_point, j)
-                curl_u = shape_curl(cv.A, q_point, j)
+                u = shape_value(cv, q_point, j)
+                curl_u = shape_curl(cv, q_point, j)
 
                 Ke[dof_i, dof_j] += (νe * curl_u ⋅ curl_v + 1im * ω * σe * u ⋅ v) * dΩ
-            end
-
-            for (j, dof_j) ∈ dofs_ϕ
-                ∇p = shape_gradient(cv.ϕ, q_point, j)
-
-                Ke[dof_i, dof_j] += σe * ∇p ⋅ v * dΩ
-            end
-        end
-
-        for (i, dof_i) ∈ dofs_ϕ
-            ∇q = shape_gradient(cv.ϕ, q_point, i)
-
-            # Loop over trial shape functions
-            for (j, dof_j) ∈ dofs_A
-                u = shape_value(cv.A, q_point, j)
-
-                Ke[dof_i, dof_j] += 1im * ω * σe * u ⋅ ∇q * dΩ
-            end
-
-            for (j, dof_j) ∈ dofs_ϕ
-                ∇p = shape_gradient(cv.ϕ, q_point, j)
-
-                Ke[dof_i, dof_j] += σe * ∇p ⋅ ∇q * dΩ
             end
         end
     end
@@ -108,27 +79,25 @@ reset_timer!()
 @timeit "setup" begin
     grid = saved_file_to_grid("examples/mesh/team7.msh")
 
+    order = 1
     shape = RefTetrahedron
-    ip_A = Nedelec{shape,1}()
-    ip_ϕ = Lagrange{shape,1}()
+
+    ip_A = Nedelec{shape,order}()
     ip_geo = Lagrange{shape,1}()
 
-    qr = QuadratureRule{shape}(2)
-    cv = (A=CellValues(qr, ip_A, ip_geo), ϕ=CellValues(qr, ip_ϕ, ip_geo))
+    qr = QuadratureRule{shape}(3)
+    cv = (A = CellValues(qr, ip_A, ip_geo))
 
     dh = DofHandler(grid)
     add!(dh, :A, ip_A)
-    add!(dh, :ϕ, ip_ϕ)
     close!(dh)
 
     ch = ConstraintHandler(dh)
-    add!(ch, ProjectedDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # ProjectedDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
-    add!(ch, Dirichlet(:ϕ, getfacetset(dh.grid, "outer"), Returns(0.0)))
+    #add!(ch, ProjectedDirichlet(:A, getfacetset(dh.grid, "outer"), (x, _, n) -> zero(Vec{3}))) # WeakDirichlet requires kam/WeakDirichlet branch of Ferrite.jl
     close!(ch)
 
     ## Simulation settings
-    freq = 50
-    ω = 2π * freq
+    ω = 2π * 50
 
     materials = Dict(
         "Coil" => Dict(
@@ -138,10 +107,9 @@ reset_timer!()
         )
     )
 
-    ## Apply material properties
     Ncells = getncells(dh.grid)
     J0 = zeros(Vec{3,Complex{Float64}}, Ncells)
-    σ = 1e-5 * ones(Complex{Float64}, Ncells)
+    σ = 1e-3 * ones(Complex{Float64}, Ncells)
     μr = ones(Complex{Float64}, Ncells)
 
     for (domain, material) ∈ materials
@@ -160,7 +128,6 @@ reset_timer!()
         end
     end
 
-    ## Apply coil current (TODO coil solver)
     It = 2742
     w = 0.025
     h = 0.100
@@ -184,8 +151,7 @@ reset_timer!()
     # Loop over all cells in the coil
     for cell ∈ CellIterator(dh, getcellset(dh.grid, "Coil"))
         # Reinitialize cellvalues for this cell
-        reinit!(cv.A, cell)
-        reinit!(cv.ϕ, cell)
+        reinit!(cv, cell)
 
         cell_id = cellid(cell)
         xe = getcoordinates(dh.grid, cell_id)
@@ -195,7 +161,7 @@ reset_timer!()
             proj_x = proj(x[1], cx_min, cx_max)
             proj_y = proj(x[2], cy_min, cy_max)
             τ = Vec{3}((proj_y - x[2], x[1] - proj_x, 0))
-            Jcell += It / (w * h) / length(xe) * normalize(τ)
+            Jcell += It / (w * h) / length(xe) * τ / norm(τ)
         end
 
         J0[cell_id] = Jcell
@@ -213,6 +179,7 @@ end
 
     K = allocate_matrix(SparseMatrixCSC{Complex{Float64},Int}, sp)
 end
+
 @timeit "assemble" begin
     K, f = assemble_global(cv, K, dh)
 
@@ -237,17 +204,17 @@ display(fig)
 
 ## Post-processing
 @timeit "post-processing" begin
-    B = ComputeFluxDensity(cv.A, cv.ϕ, dh, u)
+    B = ComputeFluxDensity(cv, dh, u)
     Babs = [Vec{3}(abs.(Bel)) for Bel ∈ B]
     Breal = [Vec{3}(real.(Bel)) for Bel ∈ B]
     Bimag = [Vec{3}(imag.(Bel)) for Bel ∈ B]
 
-    J = ComputeCurrentDensity(cv.A, cv.ϕ, dh, u)
+    J = ComputeCurrentDensity(cv, dh, u)
     Jabs = [Vec{3}(abs.(Jel)) for Jel ∈ J]
     Jreal = [Vec{3}(real.(Jel)) for Jel ∈ J]
     Jimag = [Vec{3}(imag.(Jel)) for Jel ∈ J]
 
-    VTKGridFile("examples/results/team7_$(freq)Hz", dh) do vtk
+    VTKGridFile("examples/results/team7_A_$(freq)Hz", dh) do vtk
         write_solution(vtk, dh, abs.(u))
         Ferrite.write_cellset(vtk, dh.grid)
         write_cell_data(vtk, Babs, "abs(B)")

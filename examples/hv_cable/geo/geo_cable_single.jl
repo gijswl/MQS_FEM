@@ -19,9 +19,11 @@ mshd_jac  = 2e-3;
 #gmsh.finalize()
 gmsh.initialize()
 gmsh.option.setNumber("General.Terminal", 1)
-gmsh.model.add("cable_geo")
+model = gmsh.model
+geo = model.geo
+mesh = model.mesh
 
-geo = gmsh.model.geo;
+model.add("cable_geo")
 
 ## Points
 geo.addPoint(0, 0, 0, mshd_cond, 1)
@@ -66,17 +68,32 @@ geo.addPhysicalGroup(2, [1], 1) # Conductor
 geo.addPhysicalGroup(2, [2], 2) # Dielectric
 geo.addPhysicalGroup(2, [3], 3) # Sheath
 geo.addPhysicalGroup(2, [4], 4) # Jacket
-gmsh.model.setPhysicalName(2, 1, "Conductor")
-gmsh.model.setPhysicalName(2, 2, "Dielectric")
-gmsh.model.setPhysicalName(2, 3, "Sheath")
-gmsh.model.setPhysicalName(2, 4, "Jacket")
+model.setPhysicalName(2, 1, "Conductor")
+model.setPhysicalName(2, 2, "Dielectric")
+model.setPhysicalName(2, 3, "Sheath")
+model.setPhysicalName(2, 4, "Jacket")
 
 geo.addPhysicalGroup(1, [4], 1) # Jacket boundary
-gmsh.model.setPhysicalName(1, 1, "jacket")
+model.setPhysicalName(1, 1, "jacket")
 
 # Generate mesh and save
-gmsh.model.geo.synchronize()
-gmsh.model.mesh.generate(2)
+bl = mesh.field.add("BoundaryLayer")
+mesh.field.setNumbers(bl, "CurvesList", [1])
+mesh.field.setNumbers(bl, "PointsList", [2, 3])
+mesh.field.setNumbers(bl, "ExcludedSurfacesList", [2])
+mesh.field.setNumber(bl, "Quads", 0)
+mesh.field.setNumber(bl, "Ratio", 1.1)
+mesh.field.setNumber(bl, "Size", 0.1e-3)
+mesh.field.setNumber(bl, "SizeFar", 1e-3)
+mesh.field.setNumber(bl, "IntersectMetrics", 1)
+mesh.field.setNumber(bl, "NbLayers", 10)
+mesh.field.setNumber(bl, "Thickness", 5e-3)
+mesh.field.setAsBoundaryLayer(bl)
 
-gmsh.write("examples/mesh/cable_single.msh")
+geo.synchronize()
+mesh.generate(2)
+
+gmsh.write("examples/hv_cable/geo/cable_single.msh")
+
+gmsh.fltk.run()
 gmsh.finalize()

@@ -1,14 +1,15 @@
-include("../src/Main.jl")
+include("../../src/Main.jl")
 using FerriteGmsh
 using TimerOutputs
 
 using Krylov: BicgstabWorkspace, bicgstab!
+using Krylov: GmresWorkspace, gmres!
 using KrylovPreconditioners: ilu
 
 reset_timer!()
 
 @timeit "setup" begin
-    grid = saved_file_to_grid("examples/mesh/cable_single.msh")
+    grid = saved_file_to_grid("examples/hv_cable/geo/cable_trefoil.msh")
 
     f = 50
     T = Complex{Float64}
@@ -16,18 +17,19 @@ reset_timer!()
     I_cond = 1000
 
     materials = Dict(
-        "Conductor" => Dict(
-            "μr" => 1,
+        "Conductor1" => Dict(
             "σ" => 36.9e6
         ),
-        "Sheath" => Dict(
-            "μr" => 1,
-            "σ" => 59.6e6
+        "Conductor2" => Dict(
+            "σ" => 36.9e6
+        ),
+        "Conductor3" => Dict(
+            "σ" => 36.9e6
         )
     )
 
     boundaries = Dict(
-        "jacket" => BoundaryInfty(T)
+        "Boundary" => BoundaryInfty(T)
     )
 
     prob = Problem2D{T}(
@@ -43,7 +45,9 @@ reset_timer!()
 
     cv, dh = init_problem(prob, grid)
     cch = CircuitHandler(dh, T)
-    add_current_coupling!(cch, "Conductor", I_cond, A_cond, 0.25)
+    add_current_coupling!(cch, "Conductor1", I_cond * exp(0im * 2π/3), A_cond, 1)
+    add_current_coupling!(cch, "Conductor2", I_cond * exp(+1im * 2π/3), A_cond, 1)
+    add_current_coupling!(cch, "Conductor3", I_cond * exp(-1im * 2π/3), A_cond, 1)
 
     ch = init_constraints(dh, prob)
     cellparams = init_params(dh, prob)
@@ -66,8 +70,11 @@ end
     ilu_τ = 1e-3 * maximum(norm.(K))
 
     Pℓ = ilu(K, τ=ilu_τ)
-    workspace = BicgstabWorkspace(K, f)
-    workspace = bicgstab!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, history=true)
+    # workspace = BicgstabWorkspace(K, f)
+    # workspace = bicgstab!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, history=true)
+
+    workspace = GmresWorkspace(K, f)
+    workspace = gmres!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, atol = 1e-12, rtol = 1e-12, history=true)
 
     u = workspace.x
     stats = workspace.stats
@@ -79,7 +86,7 @@ end
     S_cell = ComputeLossDensity(dh, cv, J_cell, Bre_cell, Bim_cell, prob, cellparams)
     (_, I_circ, _, R_circ) = ComputeLoss(dh, cv, cch, J_cell, Bre_cell, Bim_cell, prob, cellparams)
 
-    VTKGridFile("examples/results/cable_single", dh) do vtk
+    VTKGridFile("examples/hv_cable/results/cable_trefoil", dh) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
         write_cell_data(vtk, Bre_cell, "B_real")
         write_cell_data(vtk, Bim_cell, "B_imag")
@@ -101,9 +108,11 @@ lines!(ax, stats.residuals)
 display(fig)
 
 
-σ = materials["Conductor"]["σ"]
+σ = materials["Conductor1"]["σ"]
 d = 2 * 19.1e-3
 Rdc = 1 / (σ * π/4 * d^2)
 
 println("DC resistance: $(Rdc * 1e6) mΩ/km")
 println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ[2] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ[3] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
