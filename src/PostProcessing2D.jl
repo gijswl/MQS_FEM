@@ -70,8 +70,8 @@ function ComputeFluxDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}
     cell_dofs = zeros(Int, n_basefuncs)
 
     # Allocate storage for the flux density vectors
-    Bre = zeros(Ferrite.Vec{2,Float64}, getncells(dh.grid))
-    Bim = zeros(Ferrite.Vec{2,Float64}, getncells(dh.grid))
+    Bre = zeros(Ferrite.Vec{2,Float64}, getncells(dh.grid), n_quadpts)
+    Bim = zeros(Ferrite.Vec{2,Float64}, getncells(dh.grid), n_quadpts)
 
     for (cell_num, cell) ∈ enumerate(CellIterator(dh))
         celldofs!(cell_dofs, dh, cell_num)
@@ -80,24 +80,14 @@ function ComputeFluxDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}
         ue = u[cell_dofs]
         xe = getcoordinates(dh.grid, cell_num)
 
-        Bre_e = Ferrite.Vec{2,Float64}([0, 0])
-        Bim_e = Ferrite.Vec{2,Float64}([0, 0])
-        cell_area = 0
-
         for q_point ∈ 1:n_quadpts
             ∇uq = function_gradient(cv, q_point, ue)
             xq = spatial_coordinate(cv, q_point, xe)
             Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
 
-            dΩ = getdetJdV(cv, q_point)
-            cell_area += dΩ
-
-            Bre_e += Ferrite.Vec{2,Float64}(Bre_q) * dΩ
-            Bim_e += Ferrite.Vec{2,Float64}(Bim_q) * dΩ
+            Bre[cell_num, q_point] = Ferrite.Vec{2,Float64}(Bre_q)
+            Bim[cell_num, q_point] = Ferrite.Vec{2,Float64}(Bim_q)
         end
-
-        Bre[cell_num] += Bre_e / cell_area
-        Bim[cell_num] += Bim_e / cell_area
     end
 
     return Bre, Bim
@@ -108,11 +98,7 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, u::AbstractVector
     n_quadpts = getnquadpoints(cv)
     cell_dofs = zeros(Int, n_basefuncs)
 
-    if(typeof(problem.time) <: TimeHarmonic)
-        ω = problem.time.ω
-    else
-        ω = 0
-    end
+    ω = get_frequency(problem)
 
     # Allocate storage for the current density vectors
     Ncell = getncells(dh.grid)
@@ -150,16 +136,12 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, ch::CircuitHandle
     n_quadpts = getnquadpoints(cv)
     cell_dofs = zeros(Int, n_basefuncs)
 
-    if(typeof(problem.time) <: TimeHarmonic)
-        ω = problem.time.ω
-    else
-        ω = 0
-    end
+    ω = get_frequency(problem)
 
     # Allocate storage for the current density vectors
     Ncell = getncells(dh.grid)
-    Jsource = zeros(T, Ncell)
-    Jeddy = zeros(T, Ncell)
+    Jsource = zeros(T, Ncell, n_quadpts)
+    Jeddy = zeros(T, Ncell, n_quadpts)
 
     for (cell_num, cell) ∈ enumerate(CellIterator(dh))
         celldofs!(cell_dofs, dh, cell_num)
@@ -168,76 +150,60 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, ch::CircuitHandle
         ue = u[cell_dofs] # TODO eddy currents in axisymmetric model
         σe = cellparams.σ[cell_num]
 
-        AvgAz = zero(T)
-        cell_area = 0
-
         for q_point ∈ 1:n_quadpts
             uq = function_value(cv, q_point, ue)
-            dΩ = getdetJdV(cv, q_point)
 
-            AvgAz += uq * dΩ
-            cell_area += dΩ
+            Jeddy[cell_num, q_point] += -1im * σe * ω * uq
+            Jsource[cell_num, q_point] += cellparams.J0[cell_num]
         end
-        AvgAz /= cell_area
-
-        Jeddy[cell_num] += -1im * σe * ω * AvgAz
-        Jsource[cell_num] += cellparams.J0[cell_num]
     end
 
     for (i, coupling) ∈ enumerate(ch.coupling)
         coupling_idx = ndofs(dh) + i
 
         for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
-            reinit!(cv, cell)
             cell_num = cellid(cell)
 
-            σe = cellparams.σ[cell_num]
-            νe = cellparams.ν[cell_num]
-
-            Jsource[cell_num] += u[coupling_idx] / (coupling.symm_factor * coupling.area)
+            Jsource[cell_num, :] .+= u[coupling_idx] / (coupling.symm_factor * coupling.area)
         end
     end
 
     return Jsource + Jeddy
 end
 
-function ComputeLossDensity(dh::DofHandler, cv::CellValues, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
-    if(typeof(problem.time) <: TimeHarmonic)
-        ω = problem.time.ω
-    else
-        ω = 0
-    end
+function ComputeLossDensity(dh::DofHandler, cv::CellValues, J::AbstractMatrix{T}, Bre::AbstractMatrix{U}, Bim::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
+    ω = get_frequency(problem)
 
-    σ = cellparams.σ
-    ν = cellparams.ν
-
-    S_cell = zeros(Complex{Float64}, getncells(dh.grid))
+    n_quadpts = getnquadpoints(cv)
+    S_cell = zeros(Complex{Float64}, getncells(dh.grid), n_quadpts)
 
     for cell ∈ CellIterator(dh)
         cell_num = cellid(cell)
-        Je = J[cell_num]
-        σe = σ[cell_num]
-        νe = ν[cell_num]
+        σe = cellparams.σ[cell_num]
+        νe = cellparams.ν[cell_num]
 
-        Bre_e = Bre[cell_num]
-        Bim_e = Bim[cell_num]
+        for q_point ∈ 1:n_quadpts
+            Je_q = J[cell_num, q_point]
+            Bre_q = Bre[cell_num, q_point]
+            Bim_q = Bim[cell_num, q_point]
 
-        B_e = Vec{2, T}((Bre_e[1] + 1im * Bim_e[1], Bre_e[2] + 1im * Bim_e[2]))
+            B_q = Vec{2,T}((Bre_q[1] + 1im * Bim_q[1], Bre_q[2] + 1im * Bim_q[2]))
 
-        sm = 0.5im * ω * B_e ⋅ Vec{2}(conj(νe ⋅ B_e))
-        if (norm(Je) > 0)
-            se = norm(Je)^2 / (2 * σe)
-        else
-            se = 0
+            sm = 0.5im * ω * B_q ⋅ Vec{2}(conj(νe ⋅ B_q))
+            if (norm(Je_q) > 0)
+                se = norm(Je_q)^2 / (2 * σe)
+            else
+                se = 0
+            end
+
+            S_cell[cell_num, q_point] += se + sm
         end
-
-        S_cell[cell_num] += se + sm
     end
 
     return S_cell
 end
 
-function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::AbstractVector{T}, Bre::AbstractVector{U}, Bim::AbstractVector{U}, problem::Problem2D{T}, cellparams::CellParams) where {T, U}
+function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::AbstractMatrix{T}, Bre::AbstractMatrix{U}, Bim::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
     n_quadpts = getnquadpoints(cv)
 
     # Result storage
@@ -258,8 +224,6 @@ function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::Abst
             reinit!(cv, cell)
             cell_num = cellid(cell)
 
-            Je = J[cell_num]
-            Se = S_cell[cell_num]
             xe = getcoordinates(dh.grid, cell_num)
 
             for q_point ∈ 1:n_quadpts
@@ -267,6 +231,9 @@ function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::Abst
                 xq = spatial_coordinate(cv, q_point, xe)
 
                 depth = get_modeldepth(problem, problem.symmetry, xq)
+
+                Je = J[cell_num, q_point]
+                Se = S_cell[cell_num, q_point]
 
                 I_circ[i] += Je * dΩ
                 S_circ[i] += Se * depth * dΩ

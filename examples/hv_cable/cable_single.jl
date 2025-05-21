@@ -80,18 +80,16 @@ end
 @timeit "post-processing" begin
     Bre_cell, Bim_cell = ComputeFluxDensity(dh, cv, u, prob, cellparams)
     J_cell = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
-    S_cell = ComputeLossDensity(dh, cv, J_cell, Bre_cell, Bim_cell, prob, cellparams)
     (_, I_circ, _, R_circ) = ComputeLoss(dh, cv, cch, J_cell, Bre_cell, Bim_cell, prob, cellparams)
 
-    VTKGridFile("examples/hv_cable/results/cable_single", dh) do vtk
+    VTKGridFile("examples/hv_cable/results/cable_single", dh; write_discontinuous = true) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
-        write_cell_data(vtk, Bre_cell, "B_real")
-        write_cell_data(vtk, Bim_cell, "B_imag")
-        write_cell_data(vtk, real.(J_cell), "J_real")
-        write_cell_data(vtk, imag.(J_cell), "J_imag")
-        write_cell_data(vtk, norm.(J_cell), "J_norm")
-        write_cell_data(vtk, imag.(S_cell), "S_imag")
-        write_cell_data(vtk, real.(S_cell), "S_real")
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_real)
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_imag)
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_norm)
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :J_norm)
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_real)
+        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_imag)
     end
 end
 

@@ -28,10 +28,18 @@ struct TimeStatic <: TimeVariation end
 end
 # struct TimeTransient <: TimeVariation end
 
+function get_frequency(problem::AbstractProblem)
+    if (typeof(problem.time) <: TimeHarmonic)
+        return problem.time.ω
+    else
+        return 0
+    end
+end
+
 ## Two-dimensional problem
 abstract type Symmetry2D end
 struct Axi2D <: Symmetry2D end
-struct Planar2D <: Symmetry2D 
+struct Planar2D <: Symmetry2D
     depth::Real
 end
 
