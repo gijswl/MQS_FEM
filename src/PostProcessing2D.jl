@@ -1,3 +1,13 @@
+function get_nquadpoints(dh::DofHandler, cv::CV) where {CV<:NamedTuple}
+    n_quadpts = 0
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        n_quadpts = max(n_quadpts, getnquadpoints(cv_))
+    end
+
+    return n_quadpts
+end
+
 function ComputeFluxDensity(∇Aq::Vec{2,T}, ::Vec{2}, ::Problem2D{T}, ::Planar2D) where {T}
     ∇Aq_re = real(∇Aq)
     ∇Aq_im = imag(∇Aq)
@@ -10,24 +20,31 @@ function ComputeFluxDensity(∇Aq::Vec{2,T}, ::Vec{2}, ::Problem2D{T}, ::Planar2
     return Ferrite.Vec{2,Float64}((Bre_x, Bre_y)), Ferrite.Vec{2,Float64}((Bim_x, Bim_y))
 end
 
-function ComputeFluxDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
-    n_quadpts = getnquadpoints(cv)
+function ComputeFluxDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+    Be = zeros(Ferrite.Vec{2,T}, getncells(dh.grid), get_nquadpoints(dh, cv))
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        ComputeFluxDensity!(Be, sdh, cv_, u, problem, cellparams)
+    end
 
+    return Be
+end
+
+function ComputeFluxDensity!(Be, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
     # Allocate temporary storage
-    drange = dof_range(dh, :A)
+    drange = dof_range(sdh, :A)
     ue = zeros(T, length(drange))
-    Be = zeros(Ferrite.Vec{2,T}, getncells(dh.grid), n_quadpts)
 
-    for cell ∈ CellIterator(dh)
+    for cell ∈ CellIterator(sdh)
         cell_num = cellid(cell)
         reinit!(cv, cell)
 
         for (i, I) in pairs(drange)
             ue[i] = u[cell.dofs[I]]
         end
-        xe = getcoordinates(dh.grid, cell_num)
+        xe = getcoordinates(sdh.dh.grid, cell_num)
 
-        for q_point ∈ 1:n_quadpts
+        for q_point ∈ 1:getnquadpoints(cv)
             ∇uq = function_gradient(cv, q_point, ue)
             xq = spatial_coordinate(cv, q_point, xe)
             Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
@@ -35,21 +52,27 @@ function ComputeFluxDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}
             Be[cell_num, q_point] = Bre_q + 1im * Bim_q
         end
     end
-
-    return Be
 end
 
-function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
-    n_quadpts = getnquadpoints(cv)
+function ComputeCurrentDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+    # Allocate temporary storage
+    Je = zeros(T, getncells(dh.grid), get_nquadpoints(dh, cv))
 
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        ComputeCurrentDensity!(Je, sdh, cv_, u, problem, cellparams)
+    end
+
+    return Je
+end
+
+function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
     ω = get_frequency(problem)
 
-    # Allocate temporary storage
-    drange = dof_range(dh, :A)
+    drange = dof_range(sdh, :A)
     ue = zeros(T, length(drange))
-    Je = zeros(T, getncells(dh.grid), n_quadpts)
-
-    for cell ∈ CellIterator(dh)
+    
+    for cell ∈ CellIterator(sdh)
         cell_num = cellid(cell)
         reinit!(cv, cell)
 
@@ -59,44 +82,56 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, u::AbstractVector
         σe = cellparams.σ[cell_num]
         J0e = cellparams.J0[cell_num]
 
-        for q_point ∈ 1:n_quadpts
+        for q_point ∈ 1:getnquadpoints(cv)
             uq = function_value(cv, q_point, ue)
 
             Je[cell_num, q_point] += J0e - 1im * σe * ω * uq
         end
     end
-
-    return Je
 end
 
-function ComputeCurrentDensity(dh::DofHandler, cv::CellValues, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
+function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     Je = ComputeCurrentDensity(dh, cv, u, problem, cellparams)
 
     for (i, coupling) ∈ enumerate(ch.coupling)
         coupling_idx = ndofs(dh) + i
+        domain_set = getcellset(dh.grid, coupling.domain)
 
-        for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
-            cell_num = cellid(cell)
+        for sdh ∈ dh.subdofhandlers
+            for cell ∈ CellIterator(sdh)
+                cell_num = cellid(cell)
+                if(cell_num ∉ domain_set)
+                    continue
+                end
 
-            Je[cell_num, :] .+= u[coupling_idx] / (coupling.symm_factor * coupling.area)
+                Je[cell_num, :] .+= u[coupling_idx] / (coupling.symm_factor * coupling.area)
+            end
         end
     end
 
     return Je
 end
 
-function ComputeLossDensity(dh::DofHandler, cv::CellValues, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
+function ComputeLossDensity(dh::DofHandler, cv::CV, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
+    n_quadpts = get_nquadpoints(dh, cv)
+    S_cell = zeros(Complex{Float64}, getncells(dh.grid), n_quadpts)
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        ComputeLossDensity!(S_cell, sdh, cv_, J, B, problem, cellparams)
+    end
+
+    return S_cell
+end
+
+function ComputeLossDensity!(S_cell, sdh::SubDofHandler, cv::CellValues, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
     ω = get_frequency(problem)
 
-    n_quadpts = getnquadpoints(cv)
-    S_cell = zeros(Complex{Float64}, getncells(dh.grid), n_quadpts)
-
-    for cell ∈ CellIterator(dh)
+    for cell ∈ CellIterator(sdh)
         cell_num = cellid(cell)
         σe = cellparams.σ[cell_num]
         νe = cellparams.ν[cell_num]
 
-        for q_point ∈ 1:n_quadpts
+        for q_point ∈ 1:getnquadpoints(cv)
             Je_q = J[cell_num, q_point]
             Be_q = B[cell_num, q_point]
 
@@ -110,13 +145,9 @@ function ComputeLossDensity(dh::DofHandler, cv::CellValues, J::AbstractMatrix{T}
             S_cell[cell_num, q_point] += se + sm
         end
     end
-
-    return S_cell
 end
 
-function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
-    n_quadpts = getnquadpoints(cv)
-
+function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
     # Result storage
     ## Cell quantities
     S_cell = zeros(Complex{Float64}, getncells(dh.grid))
@@ -131,23 +162,31 @@ function ComputeLoss(dh::DofHandler, cv::CellValues, ch::CircuitHandler, J::Abst
 
     # Calculate the loss and current for each circuit
     for (i, coupling) ∈ enumerate(ch.coupling)
-        for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
-            cell_num = cellid(cell)
-            reinit!(cv, cell)
+        domain_set = getcellset(dh.grid, coupling.domain)
 
-            xe = getcoordinates(dh.grid, cell_num)
+        for sdh ∈ dh.subdofhandlers
+            cv_ = get_cellvalues(cv, getcelltype(sdh))
+            for cell ∈ CellIterator(sdh)
+                cell_num = cellid(cell)
+                if (cell_num ∉ domain_set)
+                    continue
+                end
+                reinit!(cv_, cell)
 
-            for q_point ∈ 1:n_quadpts
-                dΩ = getdetJdV(cv, q_point)
-                xq = spatial_coordinate(cv, q_point, xe)
+                xe = getcoordinates(dh.grid, cell_num)
 
-                depth = get_modeldepth(problem, problem.symmetry, xq)
+                for q_point ∈ 1:getnquadpoints(cv_)
+                    dΩ = getdetJdV(cv_, q_point)
+                    xq = spatial_coordinate(cv_, q_point, xe)
 
-                Je = J[cell_num, q_point]
-                Se = S_cell[cell_num, q_point]
+                    depth = get_modeldepth(problem, problem.symmetry, xq)
 
-                I_circ[i] += Je * dΩ
-                S_circ[i] += Se * depth * dΩ
+                    Je = J[cell_num, q_point]
+                    Se = S_cell[cell_num, q_point]
+
+                    I_circ[i] += Je * dΩ
+                    S_circ[i] += Se * depth * dΩ
+                end
             end
         end
 

@@ -78,14 +78,23 @@ function add_sparsity_circuit!(sp::SparsityPattern, dh::DofHandler, ch::CircuitH
     end
 end
 
-function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cellvalues::CellValues, dh::DofHandler, ch::CircuitHandler)
+function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV <: NamedTuple}
+    for sdh ∈ dh.subdofhandlers
+        cell_type = getcelltype(sdh)
+        cv_ = get_cellvalues(cv, cell_type)
+
+        apply_circuit_couplings!(problem, time, params, K, f, cv_, sdh, ch)
+    end
+end
+
+function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, ch::CircuitHandler)
     for (i, coupling) ∈ enumerate(ch.coupling)
-        coupling_idx = ndofs(dh) + i
+        coupling_idx = ndofs(sdh.dh) + i
 
         if (typeof(coupling) <: CurrentCoupling)
-            apply_current_coupling!(problem, time, params, K, f, cellvalues, dh, coupling, coupling_idx)
+            apply_current_coupling!(problem, time, params, K, f, cv, sdh, coupling, coupling_idx)
         #elseif (typeof(coupling) <: VoltageCoupling)
-        #    apply_voltage_coupling!(K, f, cellvalues, dh, coupling, coupling_idx, params)
+        #    apply_voltage_coupling!(K, f, cv, sdh, coupling, coupling_idx, params)
         else
             error("Coupling $(typeof(c)) not implemented")
         end
@@ -94,35 +103,39 @@ function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params
     return K, f
 end
 
-function apply_current_coupling!(::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cellvalues::CellValues, dh::DofHandler, coupling::CircuitCoupling, coupling_idx::Int)
+function apply_current_coupling!(::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, coupling::CircuitCoupling, coupling_idx::Int)
     # Allocate the element stiffness matrix and element force vector
-    n_basefuncs = getnbasefunctions(cellvalues)
+    n_basefuncs = getnbasefunctions(cv)
     Ke = zeros(Complex{Float64}, n_basefuncs)
     KTe = zeros(Complex{Float64}, n_basefuncs)
 
     ω = time.ω
 
-    for cell ∈ CellIterator(dh, getcellset(dh.grid, coupling.domain))
-        reinit!(cellvalues, cell)
+    domain_set =  getcellset(sdh.dh.grid, coupling.domain)
+    for cell ∈ CellIterator(sdh)
+        cell_id = cellid(cell)
+        if(cell_id ∉ domain_set)
+            continue
+        end
+        reinit!(cv, cell)
 
         # Reset to 0
         fill!(Ke, 0)
         fill!(KTe, 0)
 
         # Retrieve physical parameters
-        cell_id = cellid(cell)
         σe = params.σ[cell_id]
         x = getcoordinates(dh.grid, cell_id)
 
         # Loop over quadrature points
-        for q_point in 1:getnquadpoints(cellvalues)
+        for q_point in 1:getnquadpoints(cv)
             # Get the quadrature weight
-            coord = spatial_coordinate(cellvalues, q_point, x)
-            dΩ = getdetJdV(cellvalues, q_point)
+            coord = spatial_coordinate(cv, q_point, x)
+            dΩ = getdetJdV(cv, q_point)
 
             # Loop over test shape functions
             for i in 1:n_basefuncs
-                v = shape_value(cellvalues, q_point, i)
+                v = shape_value(cv, q_point, i)
 
                 Ke[i] += -1im * ω * σe * v * dΩ
                 KTe[i] += -1 / (coupling.area * coupling.symm_factor) * v * dΩ

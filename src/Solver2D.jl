@@ -59,21 +59,44 @@ function apply_material!(J0, σ, ν, cellset, material)
 end
 
 function init_problem(problem::Problem2D, grid::Grid{2})
-    refshape = getrefshape(grid.cells[1])
-
     fe_order = problem.fe_order
     qr_order = problem.qr_order
+    ip_tri = Lagrange{RefTriangle,fe_order}()
+    ip_quad = Lagrange{RefQuadrilateral,fe_order}()
 
-    ip_fe = Lagrange{refshape,fe_order}()
-    ip_geo = Lagrange{refshape,1}()
-    qr = QuadratureRule{refshape}(qr_order)
-    cv = CellValues(qr, ip_fe, ip_geo)
+    cells_tri = Int64[]
+    cells_quad = Int64[]
+    for (cell_num, cell) ∈ enumerate(grid.cells)
+        shape = getrefshape(cell)
+
+        if (shape == RefTriangle)
+            push!(cells_tri, cell_num)
+        elseif (shape == RefQuadrilateral)
+            push!(cells_quad, cell_num)
+        else
+            error("Reference shape $shape not implemented")
+        end
+    end
+    addcellset!(grid, "cells_tri", cells_tri)
+    addcellset!(grid, "cells_quad", cells_quad)
 
     dh = DofHandler(grid)
-    add!(dh, :A, ip_fe)
+    if (!isempty(cells_tri))
+        sdh_tri = SubDofHandler(dh, getcellset(grid, "cells_tri"))
+        add!(sdh_tri, :A, ip_tri)
+    end
+    if (!isempty(cells_quad))
+        sdh_quad = SubDofHandler(dh, getcellset(grid, "cells_quad"))
+        add!(sdh_quad, :A, ip_quad)
+    end
     close!(dh)
 
-    return cv, dh
+    qr_tri = QuadratureRule{RefTriangle}(qr_order)
+    qr_quad = QuadratureRule{RefQuadrilateral}(qr_order)
+    cv_tri = CellValues(qr_tri, ip_tri)
+    cv_quad = CellValues(qr_quad, ip_quad)
+
+    return (tri=cv_tri, quad=cv_quad), dh
 end
 
 function init_params(dh::DofHandler, problem::Problem2D{T}) where {T}
@@ -126,26 +149,40 @@ function allocate(dh::DofHandler, cch::CircuitHandler, ::Problem2D{T}) where {T}
     return K
 end
 
-function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CellValues, problem::Problem2D{T}, cellparams::CellParams) where {T}
-    # Allocate the element stiffness matrix and element force vector
-    n_basefuncs = getnbasefunctions(cv)
-    Ke = zeros(T, n_basefuncs, n_basefuncs)
-    fe = zeros(T, n_basefuncs)
+get_cellvalues(cv::CV, ::Type{Triangle}) where {CV<:NamedTuple} = cv.tri
+get_cellvalues(cv::CV, ::Type{Quadrilateral}) where {CV<:NamedTuple} = cv.quad
 
+function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CV, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     # Allocate global force vector f
     f = zeros(T, size(K, 1))
 
     # Create an assembler
     assembler = start_assemble(K, f)
-    # Loop over all cels
-    for cell ∈ CellIterator(dh)
+
+    for sdh ∈ dh.subdofhandlers
+        cell_type = getcelltype(sdh)
+        cv_ = get_cellvalues(cv, cell_type)
+
+        assemble_global!(assembler, sdh, cv_, problem, cellparams)
+    end
+
+    return K, f
+end
+
+function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandler, cv::CellValues, problem::Problem2D{T}, cellparams::CellParams) where{T}
+    n_basefuncs = getnbasefunctions(cv)
+    Ke = zeros(T, n_basefuncs, n_basefuncs)
+    fe = zeros(T, n_basefuncs)
+
+    # Loop over all cells in the sub dof handler
+    for cell ∈ CellIterator(sdh)
         reinit!(cv, cell)
         cell_id = cellid(cell)
 
         Je = cellparams.J0[cell_id]
         σe = cellparams.σ[cell_id]
         νe = cellparams.ν[cell_id]
-        x = getcoordinates(dh.grid, cell_id)
+        x = getcoordinates(sdh.dh.grid, cell_id)
 
         # Compute element contribution
         assemble_element!(problem.symmetry, problem.time, Ke, fe, cv, Je, σe, νe, x)
@@ -153,6 +190,7 @@ function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CellValues, pro
         # Assemble Ke and fe into K and f
         assemble!(assembler, celldofs(cell), Ke, fe)
     end
+
     return K, f
 end
 
