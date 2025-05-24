@@ -5,7 +5,7 @@ ro = 37.5e-3;   # Insulation outer radius
 rj = 46.5e-3;   # Cable outer radius
 
 lc1 = 5e-3;     # Mesh density at outside of cable
-lc2 = 1e-3;   # Mesh density at the conductor edge
+lc2 = 3e-3;   # Mesh density at the conductor edge
 lc3 = 30e-3;
 
 x1 =   0; y1 =  2/3 * sqrt(3) * rj;
@@ -92,6 +92,8 @@ model.setPhysicalName(2, con3, "Conductor3")
 model.setPhysicalName(2, insulator, "Insulator")
 model.setPhysicalName(2, jacket, "Jacket")
 
+geo.synchronize()
+
 # Generate mesh and save
 bl = mesh.field.add("BoundaryLayer")
 mesh.field.setNumbers(bl, "CurvesList", con1_edges)
@@ -99,10 +101,10 @@ mesh.field.setNumbers(bl, "ExcludedSurfacesList", [ins1_surf])
 mesh.field.setNumber(bl, "Quads", 1)
 mesh.field.setNumber(bl, "Ratio", 1.1)
 mesh.field.setNumber(bl, "Size", 0.1e-3)
-mesh.field.setNumber(bl, "SizeFar", 1e-3)
+mesh.field.setNumber(bl, "SizeFar", 10e-3)
 mesh.field.setNumber(bl, "IntersectMetrics", 1)
-mesh.field.setNumber(bl, "NbLayers", 10)
-mesh.field.setNumber(bl, "Thickness", 5e-3)
+mesh.field.setNumber(bl, "NbLayers", 15)
+mesh.field.setNumber(bl, "Thickness", 10e-3)
 mesh.field.setAsBoundaryLayer(bl)
 
 bl = mesh.field.add("BoundaryLayer")
@@ -111,10 +113,10 @@ mesh.field.setNumbers(bl, "ExcludedSurfacesList", [ins2_surf])
 mesh.field.setNumber(bl, "Quads", 1)
 mesh.field.setNumber(bl, "Ratio", 1.1)
 mesh.field.setNumber(bl, "Size", 0.1e-3)
-mesh.field.setNumber(bl, "SizeFar", 1e-3)
+mesh.field.setNumber(bl, "SizeFar", 10e-3)
 mesh.field.setNumber(bl, "IntersectMetrics", 1)
-mesh.field.setNumber(bl, "NbLayers", 10)
-mesh.field.setNumber(bl, "Thickness", 5e-3)
+mesh.field.setNumber(bl, "NbLayers", 15)
+mesh.field.setNumber(bl, "Thickness", 10e-3)
 mesh.field.setAsBoundaryLayer(bl)
 
 bl = mesh.field.add("BoundaryLayer")
@@ -123,13 +125,12 @@ mesh.field.setNumbers(bl, "ExcludedSurfacesList", [ins3_surf])
 mesh.field.setNumber(bl, "Quads", 1)
 mesh.field.setNumber(bl, "Ratio", 1.1)
 mesh.field.setNumber(bl, "Size", 0.1e-3)
-mesh.field.setNumber(bl, "SizeFar", 1e-3)
+mesh.field.setNumber(bl, "SizeFar", 10e-3)
 mesh.field.setNumber(bl, "IntersectMetrics", 1)
-mesh.field.setNumber(bl, "NbLayers", 10)
-mesh.field.setNumber(bl, "Thickness", 5e-3)
+mesh.field.setNumber(bl, "NbLayers", 15)
+mesh.field.setNumber(bl, "Thickness", 10e-3)
 mesh.field.setAsBoundaryLayer(bl)
 
-geo.synchronize()
 mesh.generate(2);
 
 gmsh.write("examples/hv_cable/geo/cable_trefoil.msh")

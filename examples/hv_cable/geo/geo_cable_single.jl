@@ -11,9 +11,9 @@ r_sh   = r_ins + R_sh;       # Sheath
 r_jac  = r_sh + R_jac;       # Jacket
 
 # Mesh density
-mshd_cond = 0.5e-3; 
-mshd_ins  = R_ins / 10;
-mshd_sh   = R_sh / 5;
+mshd_cond = 2e-3; 
+mshd_ins  = 2e-3;
+mshd_sh   = 2e-3;
 mshd_jac  = 2e-3;
     
 #gmsh.finalize()
@@ -76,6 +76,8 @@ model.setPhysicalName(2, 4, "Jacket")
 geo.addPhysicalGroup(1, [4], 1) # Jacket boundary
 model.setPhysicalName(1, 1, "jacket")
 
+geo.synchronize()
+
 # Generate mesh and save
 bl = mesh.field.add("BoundaryLayer")
 mesh.field.setNumbers(bl, "CurvesList", [1])
@@ -84,13 +86,19 @@ mesh.field.setNumbers(bl, "ExcludedSurfacesList", [2])
 mesh.field.setNumber(bl, "Quads", 1)
 mesh.field.setNumber(bl, "Ratio", 1.1)
 mesh.field.setNumber(bl, "Size", 0.1e-3)
-mesh.field.setNumber(bl, "SizeFar", 1e-3)
+mesh.field.setNumber(bl, "SizeFar", 10e-3)
 mesh.field.setNumber(bl, "IntersectMetrics", 1)
-mesh.field.setNumber(bl, "NbLayers", 10)
-mesh.field.setNumber(bl, "Thickness", 5e-3)
+mesh.field.setNumber(bl, "NbLayers", 15)
+mesh.field.setNumber(bl, "Thickness", 10e-3)
 mesh.field.setAsBoundaryLayer(bl)
 
-geo.synchronize()
+mesh.setTransfiniteCurve(2, 25)
+mesh.setTransfiniteCurve(3, 25)
+mesh.setTransfiniteCurve(7, 10)
+mesh.setTransfiniteCurve(11, 10)
+mesh.setTransfiniteSurface(3, "Left")
+mesh.setRecombine(2, 3)
+
 mesh.generate(2)
 
 gmsh.write("examples/hv_cable/geo/cable_single.msh")
