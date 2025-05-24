@@ -82,7 +82,7 @@ end
     J = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
     (I_circ, S_circ, R_circ) = ComputeLoss(dh, cv, cch, J, B, prob, cellparams)
 
-    VTKGridFile("examples/hv_cable/results/cable_single", dh; write_discontinuous = true) do vtk
+    VTKGridFile("examples/hv_cable/results/cable_single", dh; write_discontinuous=true) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_real)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_imag)
@@ -105,7 +105,7 @@ print_timer()
 
 σ = materials["Conductor"]["σ"]
 d = 2 * 19.1e-3
-Rdc = 1 / (σ * π/4 * d^2)
+Rdc = 1 / (σ * π / 4 * d^2)
 
 println("DC resistance: $(Rdc * 1e6) mΩ/km")
 println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")

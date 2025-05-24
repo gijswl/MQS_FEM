@@ -71,7 +71,7 @@ function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::Abstr
 
     drange = dof_range(sdh, :A)
     ue = zeros(T, length(drange))
-    
+
     for cell ∈ CellIterator(sdh)
         cell_num = cellid(cell)
         reinit!(cv, cell)
@@ -100,7 +100,7 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::Ab
         for sdh ∈ dh.subdofhandlers
             for cell ∈ CellIterator(sdh)
                 cell_num = cellid(cell)
-                if(cell_num ∉ domain_set)
+                if (cell_num ∉ domain_set)
                     continue
                 end
 

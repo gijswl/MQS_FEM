@@ -23,6 +23,10 @@ function Ferrite._evaluate_at_grid_nodes!(
 end
 
 function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem2D, cellparams::CellParams, quantity::Symbol) where {sdim,T}
+    return write_postprocessed(vtk, dh, ch, u, problem, cellparams, quantity, string(quantity))
+end
+
+function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem2D, cellparams::CellParams, quantity::Symbol, name::String) where {sdim,T}
     cellnodes = vtk.cellnodes
     fieldname = :A
 
@@ -60,33 +64,33 @@ function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::Circuit
         _evaluate_postprocessed_at_discontinuous_vtkgrid_nodes!(data, sdh, ch, u, cv, drange, cellnodes, problem, quantity, cellparams)
     end
 
-    Ferrite._vtk_write_node_data(vtk.vtk, data, string(quantity))
+    Ferrite._vtk_write_node_data(vtk.vtk, data, name)
     return vtk
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:B_norm}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_norm}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
     return sqrt(Bre_q[1]^2 + Bre_q[2]^2 + Bim_q[1]^2 + Bim_q[2]^2)
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:B_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     Bre_q, _ = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
     return Ferrite.Vec{2,Float64}(Bre_q)
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:B_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     _, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
     return Ferrite.Vec{2,Float64}(Bim_q)
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:J_norm}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:J_norm}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     ω = get_frequency(problem)
 
     Jsource = Je
     Jeddy = -1im * σe * ω * uq
 
     for (i, coupling) ∈ enumerate(ch.coupling)
-        if cell_num ∈ getcellset(dh.grid, coupling.domain)
+        if cell_num ∈ getcellset(sdh.dh.grid, coupling.domain)
             Jsource += uc[i] / (coupling.symm_factor * coupling.area)
         end
     end
@@ -94,7 +98,7 @@ function _post_process(problem, ch::CircuitHandler, ::Val{:J_norm}, cell_num, uq
     return norm(Jsource + Jeddy)
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:S_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:S_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     ω = get_frequency(problem)
 
     B_real = _post_process(problem, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
@@ -113,7 +117,7 @@ function _post_process(problem, ch::CircuitHandler, ::Val{:S_real}, cell_num, uq
     return real(sm + se)
 end
 
-function _post_process(problem, ch::CircuitHandler, ::Val{:S_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:S_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     ω = get_frequency(problem)
 
     B_real = _post_process(problem, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
@@ -143,7 +147,7 @@ function _evaluate_postprocessed_at_discontinuous_vtkgrid_nodes!(
         @assert getnquadpoints(cv) == length(cell.nodes)
 
         cell_num = cellid(cell)
-        xe = getcoordinates(dh.grid, cell_num)
+        xe = getcoordinates(sdh.dh.grid, cell_num)
         Je = cellparams.J0[cell_num]
         σe = cellparams.σ[cell_num]
         νe = cellparams.ν[cell_num]
@@ -155,7 +159,7 @@ function _evaluate_postprocessed_at_discontinuous_vtkgrid_nodes!(
             uq = function_value(cv, qp, ue)
             ∇uq = function_gradient(cv, qp, ue)
             xq = spatial_coordinate(cv, qp, xe)
-            val = _post_process(problem, ch, Val{quantity}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+            val = _post_process(problem, sdh, ch, Val{quantity}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
 
             dataview = @view data[:, nodeid]
             fill!(dataview, 0) # purge the NaN

@@ -5,6 +5,7 @@ include("Problem.jl")
 include("CircuitCoupling.jl")
 include("Solver2D.jl")
 include("PostProcessing2D.jl")
+include("Homogenization.jl")
 
 include("FerriteAdditions.jl")
 

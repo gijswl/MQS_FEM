@@ -4,7 +4,7 @@
 Compute the homogenized reluctivity `ν` (in the x and y directions) and conductivity `σ` for the homogenization `domain`.
 Depending on which simulation is being used as input, one or more of the parameters may not be relevant.
 """
-function ComputeHomogenization(cv::CellValues, dh::DofHandler, domain::String, J::AbstractMatrix{T}, B::AbstractMatrix{U}, S::AbstractMatrix{T}, problem::Problem2D{T}) where {T,U}
+function ComputeHomogenization(dh::DofHandler, cv::CV, domain::String, J::AbstractMatrix{T}, B::AbstractMatrix{U}, S::AbstractMatrix{T}, problem::Problem2D{T}) where {T,U,CV<:NamedTuple}
     ω = get_frequency(problem)
     depth = get_modeldepth(problem, problem.symmetry, 0)
 
@@ -14,25 +14,34 @@ function ComputeHomogenization(cv::CellValues, dh::DofHandler, domain::String, J
     Stot = 0 + 0im
     domain_area = 0
 
+    domain_set = getcellset(dh.grid, domain)
+
     # Loop over the cells in the domain for numerical integration
-    for cell ∈ CellIterator(dh, getcellset(dh.grid, domain))
-        cell_num = cellid(cell)
-        reinit!(cv, cell)
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        for cell ∈ CellIterator(sdh)
+            cell_num = cellid(cell)
+            if (cell_num ∉ domain_set)
+                continue
+            end
 
-        for q_point ∈ 1:getnquadpoints(cv)
-            dΩ = getdetJdV(cv, q_point)
+            reinit!(cv_, cell)
 
-            Je = J[cell_num, q_point]
-            Se = S[cell_num, q_point]
-            Be = B[cell_num, q_point]
+            for q_point ∈ 1:getnquadpoints(cv_)
+                dΩ = getdetJdV(cv_, q_point)
 
-            # Integrate dΩ to obtain the domain area: Ω = ∫ dΩ
-            domain_area += dΩ
+                Je = J[cell_num, q_point]
+                Se = S[cell_num, q_point]
+                Be = B[cell_num, q_point]
 
-            # Integrate the quantities of interest over the domain
-            AvgB += Be * dΩ # Averaged flux density AvB = 1/Ω * ∫ B dΩ
-            Itot += Je * dΩ # Total current I = ∫ J dΩ
-            Stot += Se * dΩ # Complex loss S = ∫ s dΩ
+                # Integrate dΩ to obtain the domain area: Ω = ∫ dΩ
+                domain_area += dΩ
+
+                # Integrate the quantities of interest over the domain
+                AvgB += Be * dΩ # Averaged flux density AvB = 1/Ω * ∫ B dΩ
+                Itot += Je * dΩ # Total current I = ∫ J dΩ
+                Stot += Se * dΩ # Complex loss S = ∫ s dΩ
+            end
         end
     end
 

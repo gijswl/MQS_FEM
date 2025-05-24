@@ -45,9 +45,9 @@ reset_timer!()
 
     cv, dh = init_problem(prob, grid)
     cch = CircuitHandler(dh, T)
-    add_current_coupling!(cch, "Conductor1", I_cond * exp(0im * 2π/3), A_cond, 1)
-    add_current_coupling!(cch, "Conductor2", I_cond * exp(+1im * 2π/3), A_cond, 1)
-    add_current_coupling!(cch, "Conductor3", I_cond * exp(-1im * 2π/3), A_cond, 1)
+    add_current_coupling!(cch, "Conductor1", I_cond * exp(0im * 2π / 3), A_cond, 1)
+    add_current_coupling!(cch, "Conductor2", I_cond * exp(+1im * 2π / 3), A_cond, 1)
+    add_current_coupling!(cch, "Conductor3", I_cond * exp(-1im * 2π / 3), A_cond, 1)
 
     ch = init_constraints(dh, prob)
     cellparams = init_params(dh, prob)
@@ -84,8 +84,8 @@ end
     B = ComputeFluxDensity(dh, cv, u, prob, cellparams)
     J = ComputeCurrentDensity(dh, cv, cch, u, prob, cellparams)
     (I_circ, S_circ, R_circ) = ComputeLoss(dh, cv, cch, J, B, prob, cellparams)
-    
-    VTKGridFile("examples/hv_cable/results/cable_flat", dh; write_discontinuous = true) do vtk
+
+    VTKGridFile("examples/hv_cable/results/cable_flat", dh; write_discontinuous=true) do vtk
         write_solution(vtk, dh, abs.(u), "_abs")
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_real)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_imag)
@@ -108,7 +108,7 @@ print_timer()
 
 σ = materials["Conductor1"]["σ"]
 d = 2 * 19.1e-3
-Rdc = 1 / (σ * π/4 * d^2)
+Rdc = 1 / (σ * π / 4 * d^2)
 
 println("DC resistance: $(Rdc * 1e6) mΩ/km")
 println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")

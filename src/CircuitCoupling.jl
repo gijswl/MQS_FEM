@@ -78,7 +78,7 @@ function add_sparsity_circuit!(sp::SparsityPattern, dh::DofHandler, ch::CircuitH
     end
 end
 
-function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV <: NamedTuple}
+function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV<:NamedTuple}
     for sdh ∈ dh.subdofhandlers
         cell_type = getcelltype(sdh)
         cv_ = get_cellvalues(cv, cell_type)
@@ -93,8 +93,8 @@ function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params
 
         if (typeof(coupling) <: CurrentCoupling)
             apply_current_coupling!(problem, time, params, K, f, cv, sdh, coupling, coupling_idx)
-        #elseif (typeof(coupling) <: VoltageCoupling)
-        #    apply_voltage_coupling!(K, f, cv, sdh, coupling, coupling_idx, params)
+            #elseif (typeof(coupling) <: VoltageCoupling)
+            #    apply_voltage_coupling!(K, f, cv, sdh, coupling, coupling_idx, params)
         else
             error("Coupling $(typeof(c)) not implemented")
         end
@@ -111,10 +111,10 @@ function apply_current_coupling!(::Problem2D, time::TimeHarmonic, params::CellPa
 
     ω = time.ω
 
-    domain_set =  getcellset(sdh.dh.grid, coupling.domain)
+    domain_set = getcellset(sdh.dh.grid, coupling.domain)
     for cell ∈ CellIterator(sdh)
         cell_id = cellid(cell)
-        if(cell_id ∉ domain_set)
+        if (cell_id ∉ domain_set)
             continue
         end
         reinit!(cv, cell)
@@ -125,7 +125,7 @@ function apply_current_coupling!(::Problem2D, time::TimeHarmonic, params::CellPa
 
         # Retrieve physical parameters
         σe = params.σ[cell_id]
-        x = getcoordinates(dh.grid, cell_id)
+        x = getcoordinates(sdh.dh.grid, cell_id)
 
         # Loop over quadrature points
         for q_point in 1:getnquadpoints(cv)

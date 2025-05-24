@@ -58,12 +58,7 @@ function apply_material!(J0, σ, ν, cellset, material)
     return J0, σ, ν
 end
 
-function init_problem(problem::Problem2D, grid::Grid{2})
-    fe_order = problem.fe_order
-    qr_order = problem.qr_order
-    ip_tri = Lagrange{RefTriangle,fe_order}()
-    ip_quad = Lagrange{RefQuadrilateral,fe_order}()
-
+function preprocess_grid(grid)
     cells_tri = Int64[]
     cells_quad = Int64[]
     for (cell_num, cell) ∈ enumerate(grid.cells)
@@ -77,16 +72,27 @@ function init_problem(problem::Problem2D, grid::Grid{2})
             error("Reference shape $shape not implemented")
         end
     end
+
     addcellset!(grid, "cells_tri", cells_tri)
     addcellset!(grid, "cells_quad", cells_quad)
+end
+
+function init_problem(problem::Problem2D, grid::Grid{2})
+    fe_order = problem.fe_order
+    qr_order = problem.qr_order
+    ip_tri = Lagrange{RefTriangle,fe_order}()
+    ip_quad = Lagrange{RefQuadrilateral,fe_order}()
+
+    cells_tri = getcellset(grid, "cells_tri")
+    cells_quad = getcellset(grid, "cells_quad")
 
     dh = DofHandler(grid)
     if (!isempty(cells_tri))
-        sdh_tri = SubDofHandler(dh, getcellset(grid, "cells_tri"))
+        sdh_tri = SubDofHandler(dh, cells_tri)
         add!(sdh_tri, :A, ip_tri)
     end
     if (!isempty(cells_quad))
-        sdh_quad = SubDofHandler(dh, getcellset(grid, "cells_quad"))
+        sdh_quad = SubDofHandler(dh, cells_quad)
         add!(sdh_quad, :A, ip_quad)
     end
     close!(dh)
@@ -169,7 +175,7 @@ function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CV, problem::Pr
     return K, f
 end
 
-function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandler, cv::CellValues, problem::Problem2D{T}, cellparams::CellParams) where{T}
+function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandler, cv::CellValues, problem::Problem2D{T}, cellparams::CellParams) where {T}
     n_basefuncs = getnbasefunctions(cv)
     Ke = zeros(T, n_basefuncs, n_basefuncs)
     fe = zeros(T, n_basefuncs)
@@ -190,8 +196,6 @@ function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandl
         # Assemble Ke and fe into K and f
         assemble!(assembler, celldofs(cell), Ke, fe)
     end
-
-    return K, f
 end
 
 function assemble_element!(::Planar2D, time::TimeStatic, Ke::Matrix, fe::Vector, cv::CellValues, Je::T, σe::T, νe::Tensor{2,2,<:T}, x::Vector{<:Vec{2}}) where {T}
