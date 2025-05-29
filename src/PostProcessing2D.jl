@@ -156,6 +156,7 @@ function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatr
     I_circ = zeros(Complex{Float64}, length(ch.coupling))
     S_circ = zeros(Complex{Float64}, length(ch.coupling))
     R_circ = zeros(Float64, length(ch.coupling))
+    A_circ = zeros(Float64, length(ch.coupling))
 
     # Calculate the complex loss density for each cell
     S_cell = ComputeLossDensity(dh, cv, J, B, problem, cellparams)
@@ -186,6 +187,7 @@ function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatr
 
                     I_circ[i] += Je * dΩ
                     S_circ[i] += Se * depth * dΩ
+                    A_circ[i] += dΩ
                 end
             end
         end
@@ -195,5 +197,5 @@ function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatr
         R_circ[i] = real(2 * S_circ[i] / norm(I_circ[i])^2)
     end
 
-    return (I_circ, S_circ, R_circ)
+    return (I_circ, S_circ, R_circ, A_circ)
 end
