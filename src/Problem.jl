@@ -45,13 +45,11 @@ end
 end
 
 # Cell parameters
-struct CellParams{T}
-    J0::Vector{T}            # Source current density [A/m^2]
-    σ::Vector{T}             # Conductivity [S/m]
-    ν::Vector{<:Tensor{2,2,T}} # Reluctivity tensor [m/H]
+struct CellParams
+    J0            # Source current density [A/m^2]
+    σ             # Conductivity [S/m]
+    ν::Tensor{2,2} # Reluctivity tensor [m/H]
 end
-
-
 
 function get_frequency(problem::Problem)
     if (typeof(problem.time) <: TimeHarmonic)
