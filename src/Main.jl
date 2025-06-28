@@ -3,8 +3,8 @@ using SparseArrays
 
 include("Problem.jl")
 include("CircuitCoupling.jl")
-include("Solver2D.jl")
-include("PostProcessing2D.jl")
+include("Solver.jl")
+include("PostProcessing.jl")
 include("Homogenization.jl")
 
 include("FerriteAdditions.jl")

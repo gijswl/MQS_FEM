@@ -8,7 +8,7 @@ function get_nquadpoints(dh::DofHandler, cv::CV) where {CV<:NamedTuple}
     return n_quadpts
 end
 
-function ComputeFluxDensity(∇Aq::Vec{2,T}, ::Vec{2}, ::Problem2D{T}, ::Planar2D) where {T}
+function ComputeFluxDensity(∇Aq::Vec{2,T}, ::Vec{2}, ::Planar2D) where {T}
     ∇Aq_re = real(∇Aq)
     ∇Aq_im = imag(∇Aq)
 
@@ -20,7 +20,7 @@ function ComputeFluxDensity(∇Aq::Vec{2,T}, ::Vec{2}, ::Problem2D{T}, ::Planar2
     return Ferrite.Vec{2,Float64}((Bre_x, Bre_y)), Ferrite.Vec{2,Float64}((Bim_x, Bim_y))
 end
 
-function ComputeFluxDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+function ComputeFluxDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     Be = zeros(Ferrite.Vec{2,T}, getncells(dh.grid), get_nquadpoints(dh, cv))
     for sdh ∈ dh.subdofhandlers
         cv_ = get_cellvalues(cv, getcelltype(sdh))
@@ -30,7 +30,7 @@ function ComputeFluxDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, proble
     return Be
 end
 
-function ComputeFluxDensity!(Be, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
+function ComputeFluxDensity!(Be, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem{T}, cellparams::CellParams) where {T}
     # Allocate temporary storage
     drange = dof_range(sdh, :A)
     ue = zeros(T, length(drange))
@@ -47,14 +47,14 @@ function ComputeFluxDensity!(Be, sdh::SubDofHandler, cv::CellValues, u::Abstract
         for q_point ∈ 1:getnquadpoints(cv)
             ∇uq = function_gradient(cv, q_point, ue)
             xq = spatial_coordinate(cv, q_point, xe)
-            Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
+            Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem.symmetry)
 
             Be[cell_num, q_point] = Bre_q + 1im * Bim_q
         end
     end
 end
 
-function ComputeCurrentDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+function ComputeCurrentDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, problem::Problem{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     # Allocate temporary storage
     Je = zeros(T, getncells(dh.grid), get_nquadpoints(dh, cv))
 
@@ -66,7 +66,7 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CV, u::AbstractVector{T}, pro
     return Je
 end
 
-function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T}
+function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::AbstractVector{T}, problem::Problem{T}, cellparams::CellParams) where {T}
     ω = get_frequency(problem)
 
     drange = dof_range(sdh, :A)
@@ -90,7 +90,7 @@ function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::Abstr
     end
 end
 
-function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     Je = ComputeCurrentDensity(dh, cv, u, problem, cellparams)
 
     for (i, coupling) ∈ enumerate(ch.coupling)
@@ -112,7 +112,7 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::Ab
     return Je
 end
 
-function ComputeLossDensity(dh::DofHandler, cv::CV, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
+function ComputeLossDensity(dh::DofHandler, cv::CV, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
     n_quadpts = get_nquadpoints(dh, cv)
     S_cell = zeros(Complex{Float64}, getncells(dh.grid), n_quadpts)
     for sdh ∈ dh.subdofhandlers
@@ -123,7 +123,7 @@ function ComputeLossDensity(dh::DofHandler, cv::CV, J::AbstractMatrix{T}, B::Abs
     return S_cell
 end
 
-function ComputeLossDensity!(S_cell, sdh::SubDofHandler, cv::CellValues, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U}
+function ComputeLossDensity!(S_cell, sdh::SubDofHandler, cv::CellValues, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem{T}, cellparams::CellParams) where {T,U}
     ω = get_frequency(problem)
 
     for cell ∈ CellIterator(sdh)
@@ -147,7 +147,7 @@ function ComputeLossDensity!(S_cell, sdh::SubDofHandler, cv::CellValues, J::Abst
     end
 end
 
-function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem2D{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
+function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem{T}, cellparams::CellParams) where {T,U,CV<:NamedTuple}
     # Result storage
     ## Cell quantities
     S_cell = zeros(Complex{Float64}, getncells(dh.grid))

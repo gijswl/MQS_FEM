@@ -1,10 +1,10 @@
 """
-    ComputeHomogenization(cv::CellValues, dh::DofHandler, domain::String, J::AbstractVector{T}, B::AbstractVector{U}, S::AbstractVector{T}, problem::Problem2D{T}) where {T,U}
+    ComputeHomogenization(cv::CellValues, dh::DofHandler, domain::String, J::AbstractVector{T}, B::AbstractVector{U}, S::AbstractVector{T}, problem::Problem{T}) where {T,U}
 
 Compute the homogenized reluctivity `ν` (in the x and y directions) and conductivity `σ` for the homogenization `domain`.
 Depending on which simulation is being used as input, one or more of the parameters may not be relevant.
 """
-function ComputeHomogenization(dh::DofHandler, cv::CV, domain::String, J::AbstractMatrix{T}, B::AbstractMatrix{U}, S::AbstractMatrix{T}, problem::Problem2D{T}) where {T,U,CV<:NamedTuple}
+function ComputeHomogenization(dh::DofHandler, cv::CV, domain::String, J::AbstractMatrix{T}, B::AbstractMatrix{U}, S::AbstractMatrix{T}, problem::Problem{T}) where {T,U,CV<:NamedTuple}
     ω = get_frequency(problem)
     depth = get_modeldepth(problem, problem.symmetry, 0)
 

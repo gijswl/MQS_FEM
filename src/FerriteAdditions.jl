@@ -1,32 +1,8 @@
-function Ferrite._evaluate_at_grid_nodes!(
-    data::Union{Vector,Matrix}, sdh::SubDofHandler,
-    u::AbstractVector{T}, cv::CellValues, drange::UnitRange
-) where {T}
-    ue = zeros(T, length(drange))
-    for cell in CellIterator(sdh)
-        reinit!(cv, cell)
-        @assert getnquadpoints(cv) == length(cell.nodes)
-        for (i, I) in pairs(drange)
-            ue[i] = u[cell.dofs[I]]
-        end
-        for (qp, nodeid) in pairs(cell.nodes)
-            val = function_value(cv, qp, ue)
-            if data isa Matrix # VTK
-                data[1:length(val), nodeid] .= val
-                data[(length(val)+1):end, nodeid] .= 0 # purge the NaN
-            else
-                data[nodeid] = val
-            end
-        end
-    end
-    return data
-end
-
-function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem2D, cellparams::CellParams, quantity::Symbol) where {sdim,T}
+function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem, cellparams::CellParams, quantity::Symbol) where {sdim,T}
     return write_postprocessed(vtk, dh, ch, u, problem, cellparams, quantity, string(quantity))
 end
 
-function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem2D, cellparams::CellParams, quantity::Symbol, name::String) where {sdim,T}
+function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::CircuitHandler, u::Vector{T}, problem::Problem, cellparams::CellParams, quantity::Symbol, name::String) where {sdim,T}
     cellnodes = vtk.cellnodes
     fieldname = :A
 
@@ -69,17 +45,17 @@ function write_postprocessed(vtk::VTKGridFile, dh::DofHandler{sdim}, ch::Circuit
 end
 
 function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_norm}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
+    Bre_q, Bim_q = ComputeFluxDensity(∇uq, xq, problem.symmetry)
     return sqrt(Bre_q[1]^2 + Bre_q[2]^2 + Bim_q[1]^2 + Bim_q[2]^2)
 end
 
 function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    Bre_q, _ = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
+    Bre_q, _ = ComputeFluxDensity(∇uq, xq, problem.symmetry)
     return Ferrite.Vec{2,Float64}(Bre_q)
 end
 
 function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:B_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    _, Bim_q = ComputeFluxDensity(∇uq, xq, problem, problem.symmetry)
+    _, Bim_q = ComputeFluxDensity(∇uq, xq, problem.symmetry)
     return Ferrite.Vec{2,Float64}(Bim_q)
 end
 
@@ -101,9 +77,9 @@ end
 function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:S_real}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     ω = get_frequency(problem)
 
-    B_real = _post_process(problem, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    B_imag = _post_process(problem, ch, Val{:B_imag}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    J_norm = _post_process(problem, ch, Val{:J_norm}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    B_real = _post_process(problem, sdh, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    B_imag = _post_process(problem, sdh, ch, Val{:B_imag}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    J_norm = _post_process(problem, sdh, ch, Val{:J_norm}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
 
     B_q = B_q = Vec{2}((B_real[1] + 1im * B_imag[1], B_real[2] + 1im * B_imag[2]))
 
@@ -120,9 +96,9 @@ end
 function _post_process(problem, sdh::SubDofHandler, ch::CircuitHandler, ::Val{:S_imag}, cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
     ω = get_frequency(problem)
 
-    B_real = _post_process(problem, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    B_imag = _post_process(problem, ch, Val{:B_imag}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
-    J_norm = _post_process(problem, ch, Val{:J_norm}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    B_real = _post_process(problem, sdh, ch, Val{:B_real}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    B_imag = _post_process(problem, sdh, ch, Val{:B_imag}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
+    J_norm = _post_process(problem, sdh, ch, Val{:J_norm}(), cell_num, uq, uc, ∇uq, xq, Je, σe, νe)
 
     B_q = B_q = Vec{2}((B_real[1] + 1im * B_imag[1], B_real[2] + 1im * B_imag[2]))
 
@@ -138,7 +114,7 @@ end
 
 function _evaluate_postprocessed_at_discontinuous_vtkgrid_nodes!(
     data::Matrix, sdh::SubDofHandler, ch::CircuitHandler,
-    u::Vector{T}, cv::CellValues, drange::UnitRange, cellnodes, problem::Problem2D, quantity::Symbol, cellparams::CellParams
+    u::Vector{T}, cv::CellValues, drange::UnitRange, cellnodes, problem::Problem, quantity::Symbol, cellparams::CellParams
 ) where {T}
     ue = zeros(T, length(drange))
     uc = u[end-ncouplings(ch)+1:end]

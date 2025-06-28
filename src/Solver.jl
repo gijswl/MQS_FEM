@@ -1,8 +1,8 @@
-function get_modeldepth(problem::Problem2D, symmetry::Planar2D, ::Any)
+function get_modeldepth(problem::Problem, symmetry::Planar2D, ::Any)
     return symmetry.depth
 end
 
-function get_modeldepth(::Problem2D, ::Axi2D, x::Vec{2,<:Real})
+function get_modeldepth(::Problem, ::Axi2D, x::Vec{2,<:Real})
     return 2π * x[1]
 end
 
@@ -77,7 +77,7 @@ function preprocess_grid(grid)
     addcellset!(grid, "cells_quad", cells_quad)
 end
 
-function init_problem(problem::Problem2D, grid::Grid{2})
+function init_problem(problem::Problem, grid::Grid{2})
     fe_order = problem.fe_order
     qr_order = problem.qr_order
     ip_tri = Lagrange{RefTriangle,fe_order}()
@@ -105,7 +105,7 @@ function init_problem(problem::Problem2D, grid::Grid{2})
     return (tri=cv_tri, quad=cv_quad), dh
 end
 
-function init_params(dh::DofHandler, problem::Problem2D{T}) where {T}
+function init_params(dh::DofHandler, problem::Problem{T}) where {T}
     grid = dh.grid
 
     Ncells = getncells(grid)
@@ -122,7 +122,7 @@ function init_params(dh::DofHandler, problem::Problem2D{T}) where {T}
     return CellParams(J0, σ, ν)
 end
 
-function init_constraints(dh::DofHandler, problem::Problem2D)
+function init_constraints(dh::DofHandler, problem::Problem)
     # Define the boundary conditions using a constraint handler
     ch = ConstraintHandler(dh)
 
@@ -133,18 +133,18 @@ function init_constraints(dh::DofHandler, problem::Problem2D)
     end
 
     close!(ch)
-    update!(ch, 0.0) # Since the BCs do not depend on time, update them once at t = 0.0
+    Ferrite.update!(ch, 0.0) # Since the BCs do not depend on time, update them once at t = 0.0
 
     return ch
 end
 
-function allocate(dh::DofHandler, ::Problem2D{T}) where {T}
+function allocate(dh::DofHandler, ::Problem{T}) where {T}
     K = allocate_matrix(SparseMatrixCSC{T,Int}, dh)
 
     return K
 end
 
-function allocate(dh::DofHandler, cch::CircuitHandler, ::Problem2D{T}) where {T}
+function allocate(dh::DofHandler, cch::CircuitHandler, ::Problem{T}) where {T}
     ndof = ndofs(dh) + ncouplings(cch)
     sp = SparsityPattern(ndof, ndof; nnz_per_row=2 * ndofs_per_cell(dh.subdofhandlers[1])) # How to optimize nnz_per_row?
     add_sparsity_entries!(sp, dh)
@@ -158,7 +158,7 @@ end
 get_cellvalues(cv::CV, ::Type{Triangle}) where {CV<:NamedTuple} = cv.tri
 get_cellvalues(cv::CV, ::Type{Quadrilateral}) where {CV<:NamedTuple} = cv.quad
 
-function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CV, problem::Problem2D{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
+function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CV, problem::Problem{T}, cellparams::CellParams) where {T,CV<:NamedTuple}
     # Allocate global force vector f
     f = zeros(T, size(K, 1))
 
@@ -175,7 +175,7 @@ function assemble_global(K::SparseMatrixCSC, dh::DofHandler, cv::CV, problem::Pr
     return K, f
 end
 
-function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandler, cv::CellValues, problem::Problem2D{T}, cellparams::CellParams) where {T}
+function assemble_global!(assembler::Ferrite.AbstractAssembler, sdh::SubDofHandler, cv::CellValues, problem::Problem{T}, cellparams::CellParams) where {T}
     n_basefuncs = getnbasefunctions(cv)
     Ke = zeros(T, n_basefuncs, n_basefuncs)
     fe = zeros(T, n_basefuncs)

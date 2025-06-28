@@ -54,9 +54,9 @@ preprocess_grid(grid)
 for (i, ω) ∈ enumerate(ω_list)
     println("Run $i of $(size(ω_list, 1)): f = $(f_list[i]) Hz")
 
-    problem_1 = Problem2D{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_1)
-    problem_2 = Problem2D{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_2)
-    problem_3 = Problem2D{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_3)
+    problem_1 = Problem{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_1)
+    problem_2 = Problem{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_2)
+    problem_3 = Problem{T}(symmetry=Planar2D(1), time=TimeHarmonic(ω), fe_order=2, qr_order=4, materials=materials, sources=Dict(), boundaries=boundaries_3)
 
     # Initialize FE problems and boundary constraints
     cv, dh = init_problem(problem_1, grid)

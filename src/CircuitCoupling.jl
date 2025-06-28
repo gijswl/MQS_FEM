@@ -78,7 +78,7 @@ function add_sparsity_circuit!(sp::SparsityPattern, dh::DofHandler, ch::CircuitH
     end
 end
 
-function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV<:NamedTuple}
+function apply_circuit_couplings!(problem::Problem, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV<:NamedTuple}
     for sdh ∈ dh.subdofhandlers
         cell_type = getcelltype(sdh)
         cv_ = get_cellvalues(cv, cell_type)
@@ -87,7 +87,7 @@ function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params
     end
 end
 
-function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, ch::CircuitHandler)
+function apply_circuit_couplings!(problem::Problem, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, ch::CircuitHandler)
     for (i, coupling) ∈ enumerate(ch.coupling)
         coupling_idx = ndofs(sdh.dh) + i
 
@@ -103,7 +103,7 @@ function apply_circuit_couplings!(problem::Problem2D, time::TimeHarmonic, params
     return K, f
 end
 
-function apply_current_coupling!(::Problem2D, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, coupling::CircuitCoupling, coupling_idx::Int)
+function apply_current_coupling!(::Problem, time::TimeHarmonic, params::CellParams, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, coupling::CircuitCoupling, coupling_idx::Int)
     # Allocate the element stiffness matrix and element force vector
     n_basefuncs = getnbasefunctions(cv)
     Ke = zeros(Complex{Float64}, n_basefuncs)

@@ -19,8 +19,6 @@ BoundaryInfty(T) = BoundaryA(zero(T))
 
 
 # Problem definition
-abstract type AbstractProblem end
-
 abstract type TimeVariation end
 struct TimeStatic <: TimeVariation end
 @kwdef struct TimeHarmonic <: TimeVariation
@@ -28,22 +26,14 @@ struct TimeStatic <: TimeVariation end
 end
 # struct TimeTransient <: TimeVariation end
 
-function get_frequency(problem::AbstractProblem)
-    if (typeof(problem.time) <: TimeHarmonic)
-        return problem.time.ω
-    else
-        return 0
-    end
-end
-
-## Two-dimensional problem
+# Two-dimensional problem symmetry
 abstract type Symmetry2D end
 struct Axi2D <: Symmetry2D end
 struct Planar2D <: Symmetry2D
     depth::Real
 end
 
-@kwdef struct Problem2D{T} <: AbstractProblem
+@kwdef struct Problem{T}
     symmetry::Symmetry2D
     time::TimeVariation
     fe_order::Integer
@@ -54,27 +44,19 @@ end
     boundaries::Dict{String,<:AbstractBC}
 end
 
-## Three-dimensional problem
-abstract type FEFormulation end
-struct FormulationA <: FEFormulation end
-#struct FormulationAϕ <: FEFormulation end
-#struct FormulationTΩ <: FEFormulation end
-
-@kwdef struct Problem3D <: AbstractProblem
-    formulation::FEFormulation
-    time::TimeVariation
-    datatype::Type
-    fe_order::Integer
-    qr_order::Integer
-
-    materials::Dict
-    sources::Dict
-    boundaries::Dict
-end
-
 # Cell parameters
 struct CellParams{T}
     J0::Vector{T}            # Source current density [A/m^2]
     σ::Vector{T}             # Conductivity [S/m]
     ν::Vector{<:Tensor{2,2,T}} # Reluctivity tensor [m/H]
+end
+
+
+
+function get_frequency(problem::Problem)
+    if (typeof(problem.time) <: TimeHarmonic)
+        return problem.time.ω
+    else
+        return 0
+    end
 end

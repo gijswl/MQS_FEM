@@ -10,6 +10,7 @@ reset_timer!()
 
 @timeit "setup" begin
     grid = saved_file_to_grid("examples/hv_cable/geo/cable_trefoil.msh")
+    preprocess_grid(grid)
 
     f = 50
     T = Complex{Float64}
@@ -32,7 +33,7 @@ reset_timer!()
         "Boundary" => BoundaryInfty(T)
     )
 
-    prob = Problem2D{T}(
+    prob = Problem{T}(
         symmetry=Planar2D(1),
         time=TimeHarmonic(ω=2π * f),
         #time = TimeStatic(),
@@ -64,20 +65,20 @@ end
 
 @timeit "solve" begin
     # Direct
-    u = K \ f
+    # u = K \ f
 
-    # # Iterative
-    # ilu_τ = 1e-4 * maximum(norm.(K))
+    # Iterative
+    ilu_τ = 1e-4 * maximum(norm.(K))
 
-    # Pℓ = ilu(K, τ=ilu_τ)
+    Pℓ = ilu(K, τ=ilu_τ)
     # workspace = BicgstabWorkspace(K, f)
     # workspace = bicgstab!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, history=true)
 
-    # workspace = GmresWorkspace(K, f)
-    # workspace = gmres!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, atol = 1e-12, rtol = 1e-12, history=true)
+    workspace = GmresWorkspace(K, f)
+    workspace = gmres!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, atol = 1e-12, rtol = 1e-12, history=true)
 
-    # u = workspace.x
-    # stats = workspace.stats
+    u = workspace.x
+    stats = workspace.stats
 end
 
 @timeit "post-processing" begin
@@ -98,12 +99,12 @@ end
 
 print_timer()
 
-## Plot convergence history
-# using CairoMakie
-# fig = Figure()
-# ax = Axis(fig[1, 1], title="Convergence", xlabel="Iteration", ylabel="Residual norm", yscale=log10)
-# lines!(ax, stats.residuals)
-# display(fig)
+# Plot convergence history
+using CairoMakie
+fig = Figure()
+ax = Axis(fig[1, 1], title="Convergence", xlabel="Iteration", ylabel="Residual norm", yscale=log10)
+lines!(ax, stats.residuals)
+display(fig)
 
 
 σ = materials["Conductor1"]["σ"]
