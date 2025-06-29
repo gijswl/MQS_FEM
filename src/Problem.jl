@@ -45,10 +45,16 @@ end
 end
 
 # Cell parameters
+abstract type ConductorType end
+struct ConductorTypeNone <: ConductorType end
+struct ConductorTypeSolid <: ConductorType end
+struct ConductorTypeStranded <: ConductorType end
+
 struct CellParams
     J0            # Source current density [A/m^2]
     σ             # Conductivity [S/m]
     ν::Tensor{2,2} # Reluctivity tensor [m/H]
+    cond_type::ConductorType
 end
 
 function get_frequency(problem::Problem)

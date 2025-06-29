@@ -6,7 +6,7 @@ Depending on which simulation is being used as input, one or more of the paramet
 """
 function ComputeHomogenization(dh::DofHandler, cv::CV, domain::String, J::AbstractMatrix{T}, B::AbstractMatrix{U}, S::AbstractMatrix{T}, problem::Problem{T}) where {T,U,CV<:NamedTuple}
     ω = get_frequency(problem)
-    depth = get_modeldepth(problem, problem.symmetry, 0)
+    depth = get_modeldepth(problem.symmetry, 0)
 
     # Result storage
     AvgB = Ferrite.Vec{2,Complex{Float64}}([0, 0])

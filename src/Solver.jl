@@ -1,8 +1,8 @@
-function get_modeldepth(problem::Problem, symmetry::Planar2D, ::Any)
+function get_modeldepth(symmetry::Planar2D, ::Any)
     return symmetry.depth
 end
 
-function get_modeldepth(::Problem, ::Axi2D, x::Vec{2,<:Real})
+function get_modeldepth(::Axi2D, x::Vec{2,<:Real})
     return 2π * x[1]
 end
 
@@ -50,7 +50,7 @@ function get_material_params(material)
         ν = Tensor{2,2}((ν_, 0, 0, ν_))
     end
 
-    return CellParams(J0, σ, ν)
+    return J0, σ, ν
 end
 
 function preprocess_grid(grid)
@@ -100,14 +100,17 @@ function init_problem(problem::Problem, grid::Grid{2})
     return (tri=cv_tri, quad=cv_quad), dh
 end
 
-function init_params(dh::DofHandler, problem::Problem)
+function init_params(dh::DofHandler, ch::CircuitHandler, problem::Problem)
     ν0 = 1 / μ0
-    default = CellParams(0.0, 0.0, Tensor{2,2}((ν0, 0.0, 0.0, ν0)))
-    
+    default = CellParams(0.0, 0.0, Tensor{2,2}((ν0, 0.0, 0.0, ν0)), ConductorTypeNone())
+
     Ncells = getncells(grid)
     params = [default for _ ∈ 1:Ncells]
     for (domain, material) ∈ problem.materials
-        param = get_material_params(material)        
+        J0, σ, ν = get_material_params(material)
+        cond_type = get_conductor_type(ch, domain)
+        param = CellParams(J0, σ, ν, cond_type)
+
         for cell ∈ getcellset(dh.grid, domain)
             params[cell] = param
         end
@@ -139,7 +142,7 @@ function allocate(dh::DofHandler, ::Problem{T}) where {T}
 end
 
 function allocate(dh::DofHandler, cch::CircuitHandler, ::Problem{T}) where {T}
-    ndof = ndofs(dh) + ncouplings(cch)
+    ndof = ndofs(dh) + get_ndofs(cch)
     sp = SparsityPattern(ndof, ndof; nnz_per_row=2 * ndofs_per_cell(dh.subdofhandlers[1])) # How to optimize nnz_per_row?
     add_sparsity_entries!(sp, dh)
     add_sparsity_circuit!(sp, dh, cch)
@@ -250,7 +253,11 @@ function assemble_element!(::Planar2D, time::TimeHarmonic, Ke::Matrix, fe::Vecto
                 ∇u = shape_gradient(cv, q_point, j)
 
                 # Add contribution to Ke
-                Ke[i, j] += ((∇v ⋅ param.ν ⋅ ∇u) + 1im * ω * param.σ * (v * u)) * dΩ
+                if (typeof(param.cond_type) <: ConductorTypeStranded)
+                    Ke[i, j] += (∇v ⋅ param.ν ⋅ ∇u) * dΩ
+                else
+                    Ke[i, j] += ((∇v ⋅ param.ν ⋅ ∇u) + 1im * ω * param.σ * (v * u)) * dΩ
+                end
             end
         end
     end

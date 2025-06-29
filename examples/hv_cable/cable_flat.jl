@@ -45,21 +45,25 @@ reset_timer!()
 
     cv, dh = init_problem(prob, grid)
     cch = CircuitHandler(dh, T)
-    add_current_coupling!(cch, "Conductor1", I_cond * exp(0im * 2π / 3), A_cond, 1)
-    add_current_coupling!(cch, "Conductor2", I_cond * exp(+1im * 2π / 3), A_cond, 1)
-    add_current_coupling!(cch, "Conductor3", I_cond * exp(-1im * 2π / 3), A_cond, 1)
+    add_conductor_solid!(cch, "Conductor1")
+    add_conductor_solid!(cch, "Conductor2")
+    add_conductor_solid!(cch, "Conductor3")
 
+    cellparams = init_params(dh, cch, prob)
     ch = init_constraints(dh, prob)
-    cellparams = init_params(dh, prob)
 
     K = allocate(dh, cch, prob)
 end
 
 @timeit "assemble" begin
     K, f = assemble_global(K, dh, cv, prob, cellparams)
-    apply_circuit_couplings!(prob, prob.time, cellparams, K, f, cv, dh, cch)
+    apply_circuit_couplings!(K, f, dh, cv, cch, prob, cellparams)
 
     apply!(K, f, ch)
+
+    f[end-2] *= I_cond * exp(0im * 2π / 3)
+    f[end-1] *= I_cond * exp(+1im * 2π / 3)
+    f[end-0] *= I_cond * exp(-1im * 2π / 3)
 end
 
 @timeit "solve" begin
@@ -74,7 +78,7 @@ end
     # workspace = bicgstab!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, history=true)
 
     workspace = GmresWorkspace(K, f)
-    workspace = gmres!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, atol = 1e-12, rtol = 1e-12, history=true)
+    workspace = gmres!(workspace, K, f; M=Pℓ, ldiv=true, itmax=1000, verbose=5, atol=1e-12, rtol=1e-12, history=true)
 
     u = workspace.x
     stats = workspace.stats
@@ -90,9 +94,10 @@ end
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_real)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_imag)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_norm)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :J_norm)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_real)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_imag)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :J_norm)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_real)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_imag)
+        write_cell_data(vtk, norm.(J[:, 1]), "J_norm")
     end
 end
 
@@ -111,6 +116,6 @@ d = 2 * 19.1e-3
 Rdc = 1 / (σ * π / 4 * d^2)
 
 println("DC resistance: $(Rdc * 1e6) mΩ/km")
-println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
-println("AC resistance: $(R_circ[2] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
-println("AC resistance: $(R_circ[3] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ["Conductor1"] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ["Conductor2"] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ["Conductor3"] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")

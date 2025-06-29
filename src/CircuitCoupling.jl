@@ -1,117 +1,194 @@
-abstract type CircuitCoupling end
+abstract type FECoupling end
 
-struct CurrentCoupling{T} <: CircuitCoupling
+struct ConductorSolid <: FECoupling
     domain::String
     area::Real
     symm_factor::Real
-    current::T
 end
 
-struct VoltageCoupling{T} <: CircuitCoupling
+struct ConductorStranded <: FECoupling
     domain::String
     area::Real
     symm_factor::Real
-    voltage::T
+    N::Int # Number of strands
 end
 
-struct CircuitHandler{DH<:Ferrite.AbstractDofHandler}
-    coupling::Vector{CircuitCoupling}
-    dh::DH
+struct CircuitHandler
     data_type::DataType
+    dh::Ferrite.AbstractDofHandler
+    cond_sol::Vector{ConductorSolid}
+    cond_str::Vector{ConductorStranded}
 end
 
 function CircuitHandler(dh::Ferrite.AbstractDofHandler, val_type::DataType)
     @assert Ferrite.isclosed(dh)
 
-    CircuitHandler(CircuitCoupling[], dh, val_type)
+    CircuitHandler(val_type, dh, ConductorSolid[], ConductorStranded[])
 end
 
 function Base.show(io::IO, ::MIME"text/plain", ch::CircuitHandler)
     println(io, "CircuitHandler:")
-    print(io, "  Circuit constraints:")
-    for c in ch.coupling
-        print(io, "\n    ", "Domain: ", c.domain, ", ")
-        if (typeof(c) <: CurrentCoupling)
-            print(io, "Current: ", c.current, " A")
-        elseif (typeof(c) <: VoltageCoupling)
-            print(io, "Voltage: ", c.current, " V")
-        else
-            error("Invalid CircuitCoupling subtype $(typeof(c))")
-        end
+    print(io, "  Solid conductors:")
+    for c in ch.cond_sol
+        print(io, "\n    ", "Domain: ", c.domain)
+    end
+
+    print(io, "  Stranded conductors:")
+    for c in ch.cond_str
+        print(io, "\n    ", "Domain: ", c.domain, ", N: ", c.N)
     end
 end
 
-function add_current_coupling!(ch::CircuitHandler, dom_name::String, current, area::Real)
-    push!(ch.coupling, CurrentCoupling{ch.data_type}(dom_name, area, 1, current))
+function add_conductor_solid!(ch::CircuitHandler, domain::String)
+    add_conductor_solid!(ch, domain, 1)
 end
 
-function add_current_coupling!(ch::CircuitHandler, dom_name::String, current, area::Real, symm_factor::Real)
-    push!(ch.coupling, CurrentCoupling{ch.data_type}(dom_name, area, symm_factor, current))
+function add_conductor_solid!(ch::CircuitHandler, domain::String, symm_factor::Real)
+    @assert (symm_factor >= 0) && (symm_factor <= 1) "Symmetry factor must be between 0 and 1"
+    area = get_domain_area(ch.dh, domain) / symm_factor
+    push!(ch.cond_sol, ConductorSolid(domain, area, symm_factor))
 end
 
-function add_voltage_coupling!(ch::CircuitHandler, dom_name::String, voltage, area::Real)
-    push!(ch.coupling, VoltageCoupling{ch.data_type}(dom_name, area, 1, voltage))
+function add_conductor_stranded!(ch::CircuitHandler, domain::String, N::Integer)
+    add_conductor_stranded!(ch, domain, N, 1)
 end
 
-function add_voltage_coupling!(ch::CircuitHandler, dom_name::String, voltage, area::Real, symm_factor::Real)
-    push!(ch.coupling, VoltageCoupling{ch.data_type}(dom_name, area, symm_factor, voltage))
+function add_conductor_stranded!(ch::CircuitHandler, domain::String, N::Integer, symm_factor::Real)
+    @assert (symm_factor >= 0) && (symm_factor <= 1) "Symmetry factor must be between 0 and 1"
+    area = get_domain_area(ch.dh, domain) / symm_factor
+    push!(ch.cond_str, ConductorStranded(domain, area, symm_factor, N))
 end
 
-function ncouplings(ch::CircuitHandler)
-    return length(ch.coupling)
+function ncond_sol(ch::CircuitHandler)
+    return length(ch.cond_sol)
+end
+
+function ncond_str(ch::CircuitHandler)
+    return length(ch.cond_str)
+end
+
+function nconductors(ch::CircuitHandler)
+    return ncond_sol(ch) + ncond_str(ch)
+end
+
+function get_ndofs(ch::CircuitHandler)
+    return nconductors(ch)
+end
+
+function get_conductor_type(ch::CircuitHandler, domain::String)
+    for conductor ∈ ch.cond_str
+        if(conductor.domain == domain)
+            return ConductorTypeStranded()
+        end
+    end
+    for conductor ∈ ch.cond_sol
+        if(conductor.domain == domain)
+            return ConductorTypeSolid()
+        end
+    end
+
+    return ConductorTypeNone()
+end
+
+function get_domain_area(dh::DofHandler, domain::String)
+    Sdom = 0
+    for sdh ∈ dh.subdofhandlers
+        cell_type = getcelltype(sdh)
+        ref_shape = getrefshape(cell_type)
+
+        ip = Lagrange{ref_shape,1}()
+        qr = QuadratureRule{ref_shape}(2)
+        cv = CellValues(qr, ip)
+
+        Sdom += get_domain_area(sdh, cv, domain)
+    end
+
+    return Sdom
+end
+
+function get_domain_area(sdh::SubDofHandler, cv::CellValues, domain::String)
+    Sdom = 0
+    domain_set = getcellset(sdh.dh.grid, domain)
+    for cell ∈ CellIterator(sdh)
+        cell_id = cellid(cell)
+        if (cell_id ∉ domain_set)
+            continue
+        end
+        reinit!(cv, cell)
+
+        for q_point in 1:getnquadpoints(cv)
+            dΩ = getdetJdV(cv, q_point)
+            Sdom += dΩ
+        end
+    end
+
+    return Sdom
 end
 
 function add_sparsity_circuit!(sp::SparsityPattern, dh::DofHandler, ch::CircuitHandler)
-    for (i, coupling) ∈ enumerate(ch.coupling)
-        coupling_idx = ndofs(dh) + i
+    for (p, conductor) ∈ enumerate(ch.cond_str)
+        coupling_idx = ndofs(dh) + p
+        add_sparsity_fecoupling!(sp, dh, conductor, coupling_idx)
+    end
 
-        Ferrite.add_entry!(sp, coupling_idx, coupling_idx)
+    for (q, conductor) ∈ enumerate(ch.cond_sol)
+        coupling_idx = ndofs(dh) + ncond_str(ch) + q
+        add_sparsity_fecoupling!(sp, dh, conductor, coupling_idx)
+    end
+end
 
-        cells = getcellset(dh.grid, coupling.domain)
-        for cell ∈ cells
-            dofs = celldofs(dh, cell)
-            for dof ∈ dofs
-                Ferrite.add_entry!(sp, coupling_idx, dof)
-                Ferrite.add_entry!(sp, dof, coupling_idx)
-            end
+function add_sparsity_fecoupling!(sp::SparsityPattern, dh::DofHandler, fe_coupling::FECoupling, coupling_idx::Integer)
+    Ferrite.add_entry!(sp, coupling_idx, coupling_idx)
+
+    cells = getcellset(dh.grid, fe_coupling.domain)
+    for cell ∈ cells
+        dofs = celldofs(dh, cell)
+        for dof ∈ dofs
+            Ferrite.add_entry!(sp, coupling_idx, dof)
+            Ferrite.add_entry!(sp, dof, coupling_idx)
         end
     end
 end
 
-function apply_circuit_couplings!(problem::Problem, time::TimeHarmonic, params::Vector{CellParams}, K::SparseMatrixCSC, f::Vector, cv::CV, dh::DofHandler, ch::CircuitHandler) where {CV<:NamedTuple}
-    for sdh ∈ dh.subdofhandlers
-        cell_type = getcelltype(sdh)
-        cv_ = get_cellvalues(cv, cell_type)
-
-        apply_circuit_couplings!(problem, time, params, K, f, cv_, sdh, ch)
+function apply_circuit_couplings!(K::SparseMatrixCSC, f::Vector, dh::DofHandler, cv::CV, ch::CircuitHandler, problem::Problem, params::Vector{CellParams}) where {CV<:NamedTuple}
+    for (p, conductor) ∈ enumerate(ch.cond_str)
+        coupling_idx = ndofs(dh) + p
+        conductor.symm_factor != 1 && error("Non-unity symmetry factor not yet supported for stranded conductor $(conductor.domain)")
+        apply_conductor!(K, f, dh, cv, problem.time, problem.symmetry, params, conductor, coupling_idx)
     end
-end
 
-function apply_circuit_couplings!(problem::Problem, time::TimeHarmonic, params::Vector{CellParams}, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, ch::CircuitHandler)
-    for (i, coupling) ∈ enumerate(ch.coupling)
-        coupling_idx = ndofs(sdh.dh) + i
-
-        if (typeof(coupling) <: CurrentCoupling)
-            apply_current_coupling!(problem, time, params, K, f, cv, sdh, coupling, coupling_idx)
-            #elseif (typeof(coupling) <: VoltageCoupling)
-            #    apply_voltage_coupling!(K, f, cv, sdh, coupling, coupling_idx, params)
-        else
-            error("Coupling $(typeof(c)) not implemented")
-        end
+    for (q, conductor) ∈ enumerate(ch.cond_sol)
+        coupling_idx = ndofs(dh) + ncond_str(ch) + q
+        conductor.symm_factor != 1 && error("Non-unity symmetry factor not yet supported for solid conductor $(conductor.domain)")
+        apply_conductor!(K, f, dh, cv, problem.time, problem.symmetry, params, conductor, coupling_idx)
     end
 
     return K, f
 end
 
-function apply_current_coupling!(::Problem, time::TimeHarmonic, params::Vector{CellParams}, K::SparseMatrixCSC, f::Vector, cv::CellValues, sdh::SubDofHandler, coupling::CircuitCoupling, coupling_idx::Int)
-    # Allocate the element stiffness matrix and element force vector
+function apply_conductor!(K::SparseMatrixCSC, f::Vector, dh::DofHandler, cv::CV, time::TimeHarmonic, symmetry::Symmetry2D, params::Vector{CellParams}, conductor::ConductorSolid, coupling_idx::Int) where {CV<:NamedTuple}
+    G = 0
+    ℓ = get_modeldepth(symmetry, 0) # TODO axisymmetric
+    for sdh ∈ dh.subdofhandlers
+        cell_type = getcelltype(sdh)
+        cv_ = get_cellvalues(cv, cell_type)
+
+        K, f, G_ = apply_conductor!(K, f, sdh, cv_, symmetry, params, conductor, coupling_idx)
+        G += G_
+    end
+
+    χ = 1 / (1im * time.ω * ℓ)
+
+    K[coupling_idx, coupling_idx] = χ * G
+    f[coupling_idx] = χ
+end
+
+function apply_conductor!(K::SparseMatrixCSC, f::Vector, sdh::SubDofHandler, cv::CellValues, symm::Symmetry2D, params::Vector{CellParams}, conductor::ConductorSolid, coupling_idx::Int)
     n_basefuncs = getnbasefunctions(cv)
-    Ke = zeros(Complex{Float64}, n_basefuncs)
-    KTe = zeros(Complex{Float64}, n_basefuncs)
+    Qe = zeros(Complex{Float64}, n_basefuncs)
+    G = 0
 
-    ω = time.ω
-
-    domain_set = getcellset(sdh.dh.grid, coupling.domain)
+    domain_set = getcellset(sdh.dh.grid, conductor.domain)
     for cell ∈ CellIterator(sdh)
         cell_id = cellid(cell)
         if (cell_id ∉ domain_set)
@@ -120,8 +197,7 @@ function apply_current_coupling!(::Problem, time::TimeHarmonic, params::Vector{C
         reinit!(cv, cell)
 
         # Reset to 0
-        fill!(Ke, 0)
-        fill!(KTe, 0)
+        fill!(Qe, 0)
 
         # Retrieve physical parameters
         param = params[cell_id]
@@ -133,21 +209,84 @@ function apply_current_coupling!(::Problem, time::TimeHarmonic, params::Vector{C
             coord = spatial_coordinate(cv, q_point, x)
             dΩ = getdetJdV(cv, q_point)
 
+            σe = param.σ
+            ℓe = get_modeldepth(symm, coord[1])
+            G += σe / ℓe * dΩ
+
             # Loop over test shape functions
             for i in 1:n_basefuncs
                 v = shape_value(cv, q_point, i)
 
-                Ke[i] += -1im * ω * param.σ * v * dΩ
-                KTe[i] += -1 / (coupling.area * coupling.symm_factor) * v * dΩ
+                Qe[i] += σe / ℓe * v * dΩ
             end
         end
 
-        K[coupling_idx, celldofs(cell)] .+= Ke
-        K[celldofs(cell), coupling_idx] .+= KTe
+        K[coupling_idx, celldofs(cell)] .-= Qe
+        K[celldofs(cell), coupling_idx] .-= Qe
     end
 
-    K[coupling_idx, coupling_idx] = 1
-    f[coupling_idx] = coupling.current * coupling.symm_factor
+    return K, f, G
+end
 
-    return K, f
+function apply_conductor!(K::SparseMatrixCSC, f::Vector, dh::DofHandler, cv::CV, time::TimeHarmonic, symmetry::Symmetry2D, params::Vector{CellParams}, conductor::ConductorStranded, coupling_idx::Int) where {CV<:NamedTuple}
+    G = 0
+    ℓ = get_modeldepth(symmetry, 0) # TODO axisymmetric
+    for sdh ∈ dh.subdofhandlers
+        cell_type = getcelltype(sdh)
+        cv_ = get_cellvalues(cv, cell_type)
+
+        K, f, G_ = apply_conductor!(K, f, sdh, cv_, symmetry, params, conductor, coupling_idx)
+        G += G_
+    end
+
+    χ = 1 / (1im * time.ω * ℓ)
+    R = conductor.N^2 / conductor.area / G
+
+    K[coupling_idx, coupling_idx] = -χ * R
+    f[coupling_idx] = χ
+end
+
+function apply_conductor!(K::SparseMatrixCSC, f::Vector, sdh::SubDofHandler, cv::CellValues, symm::Symmetry2D, params::Vector{CellParams}, conductor::ConductorStranded, coupling_idx::Int)
+    n_basefuncs = getnbasefunctions(cv)
+    Pe = zeros(Complex{Float64}, n_basefuncs)
+    G = 0
+
+    domain_set = getcellset(sdh.dh.grid, conductor.domain)
+    for cell ∈ CellIterator(sdh)
+        cell_id = cellid(cell)
+        if (cell_id ∉ domain_set)
+            continue
+        end
+        reinit!(cv, cell)
+
+        # Reset to 0
+        fill!(Pe, 0)
+
+        # Retrieve physical parameters
+        param = params[cell_id]
+        x = getcoordinates(sdh.dh.grid, cell_id)
+
+        # Loop over quadrature points
+        for q_point in 1:getnquadpoints(cv)
+            # Get the quadrature weight
+            coord = spatial_coordinate(cv, q_point, x)
+            dΩ = getdetJdV(cv, q_point)
+
+            σe = param.σ
+            ℓe = get_modeldepth(symm, coord[1])
+            G += σe / ℓe * dΩ
+
+            # Loop over test shape functions
+            for i in 1:n_basefuncs
+                v = shape_value(cv, q_point, i)
+
+                Pe[i] += conductor.N / conductor.area * v * dΩ
+            end
+        end
+
+        K[coupling_idx, celldofs(cell)] .-= Pe
+        K[celldofs(cell), coupling_idx] .-= Pe
+    end
+
+    return K, f, G
 end

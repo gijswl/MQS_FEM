@@ -117,7 +117,7 @@ function _evaluate_postprocessed_at_discontinuous_vtkgrid_nodes!(
     u::Vector{T}, cv::CellValues, drange::UnitRange, cellnodes, problem::Problem, quantity::Symbol, cellparams::Vector{CellParams}
 ) where {T}
     ue = zeros(T, length(drange))
-    uc = u[end-ncouplings(ch)+1:end]
+    uc = u[end-get_ndofs(ch)+1:end]
     for cell in CellIterator(sdh)
         reinit!(cv, cell)
         @assert getnquadpoints(cv) == length(cell.nodes)

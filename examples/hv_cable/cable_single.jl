@@ -45,19 +45,21 @@ reset_timer!()
 
     cv, dh = init_problem(prob, grid)
     cch = CircuitHandler(dh, T)
-    add_current_coupling!(cch, "Conductor", I_cond, A_cond, 0.25)
+    add_conductor_solid!(cch, "Conductor", 0.25)
 
+    cellparams = init_params(dh, cch, prob)
     ch = init_constraints(dh, prob)
-    cellparams = init_params(dh, prob)
 
     K = allocate(dh, cch, prob)
 end
 
 @timeit "assemble" begin
     K, f = assemble_global(K, dh, cv, prob, cellparams)
-    apply_circuit_couplings!(prob, prob.time, cellparams, K, f, cv, dh, cch)
+    apply_circuit_couplings!(K, f, dh, cv, cch, prob, cellparams)
 
     apply!(K, f, ch)
+
+    f[end] = I_cond * 0.25
 end
 
 @timeit "solve" begin
@@ -88,9 +90,10 @@ end
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_real)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_imag)
         write_postprocessed(vtk, dh, cch, u, prob, cellparams, :B_norm)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :J_norm)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_real)
-        write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_imag)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :J_norm)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_real)
+        #write_postprocessed(vtk, dh, cch, u, prob, cellparams, :S_imag)
+        write_cell_data(vtk, norm.(J[:, 1]), "J_norm")
     end
 end
 
@@ -109,4 +112,4 @@ d = 2 * 19.1e-3
 Rdc = 1 / (σ * π / 4 * d^2)
 
 println("DC resistance: $(Rdc * 1e6) mΩ/km")
-println("AC resistance: $(R_circ[1] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")
+println("AC resistance: $(R_circ["Conductor"] * 1e6) mΩ/km @ f = $(prob.time.ω / 2π) Hz")

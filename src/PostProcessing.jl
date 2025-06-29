@@ -93,23 +93,66 @@ end
 function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem{T}, cellparams::Vector{CellParams}) where {T,CV<:NamedTuple}
     Je = ComputeCurrentDensity(dh, cv, u, problem, cellparams)
 
-    for (i, coupling) ∈ enumerate(ch.coupling)
-        coupling_idx = ndofs(dh) + i
-        domain_set = getcellset(dh.grid, coupling.domain)
+    for (p, conductor) ∈ enumerate(ch.cond_str)
+        coupling_idx = ndofs(dh) + p
+        domain_set = getcellset(dh.grid, conductor.domain)
 
-        for sdh ∈ dh.subdofhandlers
-            for cell ∈ CellIterator(sdh)
-                cell_num = cellid(cell)
-                if (cell_num ∉ domain_set)
-                    continue
-                end
+        for cell_num ∈ domain_set
+            Je[cell_num, :] .= conductor.N * u[coupling_idx] / conductor.area
+        end
+    end
 
-                Je[cell_num, :] .+= u[coupling_idx] / (coupling.symm_factor * coupling.area)
-            end
+    for (q, conductor) ∈ enumerate(ch.cond_sol)
+        coupling_idx = ndofs(dh) + ncond_str(ch) + q
+        domain_set = getcellset(dh.grid, conductor.domain)
+
+        Gdc = ComputeDCConductance(dh, cv, problem, cellparams, conductor.domain)
+        for cell_num ∈ domain_set
+            Je[cell_num, :] .+= Gdc * u[coupling_idx] / conductor.area
         end
     end
 
     return Je
+end
+
+function ComputeDCResistance(dh::DofHandler, cv::CV, problem::Problem, cellparams::Vector{CellParams}, domain::String) where {CV<:NamedTuple}
+    return 1 / ComputeDCConductance(dh, cv, problem, cellparams, domain)
+end
+
+function ComputeDCConductance(dh::DofHandler, cv::CV, problem::Problem, cellparams::Vector{CellParams}, domain::String) where {CV<:NamedTuple}
+    Gdc = 0
+    for sdh ∈ dh.subdofhandlers
+        cv_ = get_cellvalues(cv, getcelltype(sdh))
+        Gdc += ComputeDCConductance(sdh, cv_, problem.symmetry, cellparams, domain)
+    end
+
+    return Gdc
+end
+
+function ComputeDCConductance(sdh::SubDofHandler, cv::CellValues, symmetry::Symmetry2D, cellparams::Vector{CellParams}, domain::String)
+    Gdc = 0
+
+    domain_set = getcellset(sdh.dh.grid, domain)
+    for cell ∈ CellIterator(sdh)
+        cell_id = cellid(cell)
+        if (cell_id ∉ domain_set)
+            continue
+        end
+        reinit!(cv, cell)
+
+        param = cellparams[cell_id]
+        x = getcoordinates(sdh.dh.grid, cell_id)
+
+        for q_point ∈ 1:getnquadpoints(cv)
+            coord = spatial_coordinate(cv, q_point, x)
+            ℓe = get_modeldepth(symmetry, coord[1])
+
+            dΩ = getdetJdV(cv, q_point)
+            Gdc += param.σ / ℓe * dΩ
+        end
+    end
+
+    return Gdc
 end
 
 function ComputeLossDensity(dh::DofHandler, cv::CV, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem{T}, cellparams::Vector{CellParams}) where {T,U,CV<:NamedTuple}
@@ -148,21 +191,19 @@ end
 
 function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatrix{T}, B::AbstractMatrix{U}, problem::Problem{T}, cellparams::Vector{CellParams}) where {T,U,CV<:NamedTuple}
     # Result storage
-    ## Cell quantities
-    S_cell = zeros(Complex{Float64}, getncells(dh.grid))
-
-    ## Circuit quantites
-    I_circ = zeros(Complex{Float64}, length(ch.coupling))
-    S_circ = zeros(Complex{Float64}, length(ch.coupling))
-    R_circ = zeros(Float64, length(ch.coupling))
-    A_circ = zeros(Float64, length(ch.coupling))
+    I_circ = Dict()
+    S_circ = Dict()
+    R_circ = Dict()
 
     # Calculate the complex loss density for each cell
     S_cell = ComputeLossDensity(dh, cv, J, B, problem, cellparams)
 
     # Calculate the loss and current for each circuit
-    for (i, coupling) ∈ enumerate(ch.coupling)
+    coupling = vcat(ch.cond_str, ch.cond_sol)
+    for (i, coupling) ∈ enumerate(coupling)
         domain_set = getcellset(dh.grid, coupling.domain)
+        I_ = zero(T)
+        S_ = zero(T)
 
         for sdh ∈ dh.subdofhandlers
             cv_ = get_cellvalues(cv, getcelltype(sdh))
@@ -179,22 +220,21 @@ function ComputeLoss(dh::DofHandler, cv::CV, ch::CircuitHandler, J::AbstractMatr
                     dΩ = getdetJdV(cv_, q_point)
                     xq = spatial_coordinate(cv_, q_point, xe)
 
-                    depth = get_modeldepth(problem, problem.symmetry, xq)
+                    depth = get_modeldepth(problem.symmetry, xq)
 
                     Je = J[cell_num, q_point]
                     Se = S_cell[cell_num, q_point]
 
-                    I_circ[i] += Je * dΩ
-                    S_circ[i] += Se * depth * dΩ
-                    A_circ[i] += dΩ
+                    I_ += Je * dΩ
+                    S_ += Se * depth * dΩ
                 end
             end
         end
 
-        I_circ[i] = I_circ[i] / coupling.symm_factor
-        S_circ[i] = S_circ[i] / coupling.symm_factor
-        R_circ[i] = real(2 * S_circ[i] / norm(I_circ[i])^2)
+        I_circ[coupling.domain] = I_
+        S_circ[coupling.domain] = S_
+        R_circ[coupling.domain] = real(2 * S_ / norm(I_)^2)
     end
 
-    return (I_circ, S_circ, R_circ, A_circ)
+    return (I_circ, S_circ, R_circ)
 end
