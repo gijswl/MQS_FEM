@@ -50,6 +50,14 @@ reset_timer!()
     add_conductor_solid!(cch, "Conductor2")
     add_conductor_solid!(cch, "Conductor3")
 
+    add_circuit_sol!(cch.circuit, "Conductor1", 2.3645964141395557e-5, 1, 0)
+    add_circuit_sol!(cch.circuit, "Conductor2", 2.3645964141395557e-5, 2, 0)
+    add_circuit_sol!(cch.circuit, "Conductor3", 2.3645964141395557e-5, 3, 0)
+    add_circuit_I!(cch.circuit, I_cond * exp(0im * 2π / 3), 1, 0)
+    add_circuit_I!(cch.circuit, I_cond * exp(+1im * 2π / 3), 2, 0)
+    add_circuit_I!(cch.circuit, I_cond * exp(-1im * 2π / 3), 3, 0)
+    close!(cch)
+
     cellparams = init_params(dh, cch, prob)
     ch = init_constraints(dh, prob)
 
@@ -61,10 +69,6 @@ end
     apply_circuit_couplings!(K, f, dh, cv, cch, prob, cellparams)
 
     apply!(K, f, ch)
-
-    f[end-2] *= I_cond * exp(0im * 2π / 3)
-    f[end-1] *= I_cond * exp(+1im * 2π / 3)
-    f[end-0] *= I_cond * exp(-1im * 2π / 3)
 end
 
 @timeit "solve" begin

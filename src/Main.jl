@@ -2,8 +2,13 @@ using Ferrite
 using SparseArrays
 
 include("Problem.jl")
+
+include("Circuit.jl")
+include("CircuitHandler.jl")
 include("CircuitCoupling.jl")
+
 include("Solver.jl")
+
 include("PostProcessing.jl")
 include("Homogenization.jl")
 

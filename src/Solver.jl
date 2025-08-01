@@ -90,7 +90,7 @@ function init_problem(problem::Problem, grid::Grid{2})
         sdh_quad = SubDofHandler(dh, cells_quad)
         add!(sdh_quad, :A, ip_quad)
     end
-    close!(dh)
+    Ferrite.close!(dh)
 
     qr_tri = QuadratureRule{RefTriangle}(qr_order)
     qr_quad = QuadratureRule{RefQuadrilateral}(qr_order)
@@ -129,7 +129,7 @@ function init_constraints(dh::DofHandler, problem::Problem)
         add!(ch, bc)
     end
 
-    close!(ch)
+    Ferrite.close!(ch)
     Ferrite.update!(ch, 0.0) # Since the BCs do not depend on time, update them once at t = 0.0
 
     return ch

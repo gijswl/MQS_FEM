@@ -85,7 +85,11 @@ function ComputeCurrentDensity!(Je, sdh::SubDofHandler, cv::CellValues, u::Abstr
         for q_point ∈ 1:getnquadpoints(cv)
             uq = function_value(cv, q_point, ue)
 
-            Je[cell_num, q_point] += param.J0 - 1im * param.σ * ω * uq
+            if (typeof(param.cond_type) <: ConductorTypeStranded)
+                Je[cell_num, q_point] += param.J0
+            else
+                Je[cell_num, q_point] += param.J0 - 1im * param.σ * ω * uq
+            end
         end
     end
 end
@@ -93,8 +97,19 @@ end
 function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::AbstractVector{T}, problem::Problem{T}, cellparams::Vector{CellParams}) where {T,CV<:NamedTuple}
     Je = ComputeCurrentDensity(dh, cv, u, problem, cellparams)
 
-    for (p, conductor) ∈ enumerate(ch.cond_str)
-        coupling_idx = ndofs(dh) + p
+    circuit = ch.circuit
+    tree_sol = filter(e -> typeof(e) <: CircuitCoilSolid, circuit.tree)
+    tree_str = filter(e -> typeof(e) <: CircuitCoilStranded, circuit.tree)
+    cotree_str = filter(e -> typeof(e) <: CircuitCoilStranded, circuit.cotree)
+    cotree_sol = filter(e -> typeof(e) <: CircuitCoilSolid, circuit.cotree)
+
+    segmentation = circuit.coupling["segmentation"]
+    start_idx = cumsum(segmentation)
+    start_idx = [1; 1 .+ start_idx[1:end-1]]
+
+    for (p, coil) ∈ enumerate(cotree_str)
+        conductor = cch.fecoupling[coil.domain]
+        coupling_idx = ndofs(dh) + start_idx[1] + p - 1
         domain_set = getcellset(dh.grid, conductor.domain)
 
         for cell_num ∈ domain_set
@@ -102,13 +117,33 @@ function ComputeCurrentDensity(dh::DofHandler, cv::CV, ch::CircuitHandler, u::Ab
         end
     end
 
-    for (q, conductor) ∈ enumerate(ch.cond_sol)
-        coupling_idx = ndofs(dh) + ncond_str(ch) + q
+    Itree_str = circuit.coupling["Dstri"] * circuit.coupling["Ii"]
+    for (p, coil) ∈ enumerate(tree_str)
+        conductor = cch.fecoupling[coil.domain]
         domain_set = getcellset(dh.grid, conductor.domain)
 
-        Gdc = ComputeDCConductance(dh, cv, problem, cellparams, conductor.domain)
+        for cell_num ∈ domain_set
+            Je[cell_num, :] .= conductor.N * Itree_str[p] / conductor.area
+        end
+    end
+
+    for (q, coil) ∈ enumerate(tree_sol)
+        conductor = cch.fecoupling[coil.domain]
+        coupling_idx = ndofs(dh) + start_idx[3] + q - 1
+        domain_set = getcellset(dh.grid, conductor.domain)
+
+        Gdc = 1 / coil.R
         for cell_num ∈ domain_set
             Je[cell_num, :] .+= Gdc * u[coupling_idx] / conductor.area
+        end
+    end
+    for (q, coil) ∈ enumerate(cotree_sol)
+        conductor = cch.fecoupling[coil.domain]
+        domain_set = getcellset(dh.grid, conductor.domain)
+        # TODO calculate link current from known quantities
+
+        for cell_num ∈ domain_set
+
         end
     end
 
